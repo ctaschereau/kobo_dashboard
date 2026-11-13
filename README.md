@@ -8,18 +8,18 @@ calendar, top headlines) and the Kobo downloads and displays it on a schedule.
 |---|---|
 | ![Day preview](docs/preview-day.png) | ![Night preview](docs/preview-night.png) |
 
-*(Previews are generated with fake data: `python3 server/dashboard.py out.png --demo`.)*
+*(The previews use sample data; real headlines and events come from your own config.)*
 
 ## Table of contents
 
 1. [How it works](#how-it-works)
 2. [Project status](#project-status)
 3. [Repository layout](#repository-layout)
-4. [Server setup (Raspberry Pi)](#server-setup-raspberry-pi)
-5. [Configuration](#configuration)
-6. [Kobo setup](#kobo-setup)
-7. [Keeping the Kobo awake](#keeping-the-kobo-awake)
-8. [Testing without the hardware](#testing-without-the-hardware)
+4. [Example values used in this README](#example-values-used-in-this-readme)
+5. [Server setup (Raspberry Pi + nginx)](#server-setup-raspberry-pi--nginx)
+6. [Configuration](#configuration)
+7. [Kobo setup](#kobo-setup)
+8. [Keeping the Kobo awake](#keeping-the-kobo-awake)
 9. [Troubleshooting](#troubleshooting)
 10. [Roadmap](#roadmap)
 11. [Credits](#credits)
@@ -28,10 +28,11 @@ calendar, top headlines) and the Kobo downloads and displays it on a schedule.
 
 ```
  Open-Meteo (weather)  ─┐
- News RSS feed         ─┼─►  Raspberry Pi            Kobo Mini
- Calendar (.ics, TODO) ─┘    server/dashboard.py ──► kobo/kobo_fetch.sh
-                             draws dashboard.png     curl the PNG, show it with FBInk
-                             (cron, every 30 min)    (loop, every 30 min)
+ News RSS feed         ─┼─►  Raspberry Pi                       Kobo Mini
+ Calendar (.ics URL)   ─┘    server/dashboard.py                kobo/kobo_fetch.sh
+                             writes output/dashboard.png  ──►    curl the PNG, show it with FBInk
+                             (cron, every 30 min)                (loop, every 30 min)
+                             nginx serves that one file
 ```
 
 The Kobo stays "dumb": it only downloads one finished image and draws it. All the logic
@@ -43,20 +44,25 @@ change than anything running on a 2012 e-reader.
 - **Top half, left:** big weather icon (sun, moon at night, clouds, rain, snow, fog,
   storm), the condition in French, the current temperature, and the day's min/max.
 - **Top half, right:** up to 6 clothing icons for the children. Before noon they are for
-  today (based on the feels-like temperature); after noon they switch to tomorrow
+  today (based on the feels-like temperature); from noon on they switch to tomorrow
   (based on the average of tomorrow's min and max).
-- **Bottom half, left:** today's calendar events.
-- **Bottom half, right:** the top 2 news headlines.
+- **Bottom half, left:** today's calendar events that are not over yet (all-day events
+  first). Shows "Calendrier non configuré" if no calendar URL is set.
+- **Bottom half, right:** the top headlines from a news RSS feed.
+
+If a data source fails (no network, bad URL), that block shows a short French message
+("Météo indisponible", "Nouvelles indisponibles", "Calendrier indisponible") instead of
+breaking the whole image, and the error is printed to stderr.
 
 ## Project status
 
 | Part | Status |
 |---|---|
-| Image generator (layout, icons, French text, day/night) | Working, tested with demo data |
-| Weather from Open-Meteo | Implemented, not yet verified end-to-end on the Pi |
-| News headlines | Implemented, **RSS URL needs verification** |
-| Calendar | **Placeholder only** (hardcoded dummy events) |
-| Kobo fetch + display script | Written, needs on-device testing |
+| Image generator (layout, icons, French text, day/night) | Working, tested with simulated data |
+| Weather (Open-Meteo) | Implemented; not yet verified end-to-end on the Pi |
+| News headlines | Implemented; the default Radio-Canada feed is listed as working by a third-party feed aggregator, not yet tested from the Pi |
+| Calendar (.ics) | Implemented (recurring events, all-day events, time zones); tested only with synthetic calendars, not yet with a real Google/Outlook one |
+| Kobo fetch + display script | Written; needs on-device testing |
 | Staying awake / scheduled wake-up | Keep-awake test script provided; RTC wake untested |
 
 ## Repository layout
@@ -64,9 +70,16 @@ change than anything running on a 2012 e-reader.
 ```
 kobo-dashboard/
 ├── README.md
+├── config.example.ini        template for your private config (copy to config.ini)
+├── config.ini                YOUR config: not committed (.gitignore)
+├── output/                   generated image and log: not committed (.gitignore)
+│   └── dashboard.png
 ├── docs/                     preview images used in this README
 ├── server/                   runs on the Raspberry Pi
-│   ├── dashboard.py          fetches data, lays out and writes dashboard.png
+│   ├── dashboard.py          entry point: fetches data, lays out, writes the image
+│   ├── config.py             loads config.ini
+│   ├── calendar_events.py    reads an .ics URL, returns today's events
+│   ├── draw_utils.py         fonts, text fitting and wrapping helpers
 │   ├── icons.py              hand-drawn weather and clothing icons
 │   └── requirements.txt      Python dependencies
 └── kobo/                     runs on the Kobo
@@ -74,56 +87,126 @@ kobo-dashboard/
     └── kobo_loop_test.sh     display a local image in a loop to test that the Kobo stays awake
 ```
 
-## Server setup (Raspberry Pi)
+## Example values used in this README
 
-**1. Install dependencies** (Raspberry Pi OS):
+So that the commands can be copy-pasted as they are, the README assumes:
+
+| What | Example value |
+|---|---|
+| Raspberry Pi address | `192.168.1.135` |
+| Pi user | `pi` |
+| Project folder on the Pi | `/home/pi/kobo-dashboard` |
+| Location | Montréal (`45.5017`, `-73.5673`) |
+
+Replace them with your own where they differ. Give the Pi a fixed IP (or a reserved DHCP
+lease on your router) so its address never changes.
+
+## Server setup (Raspberry Pi + nginx)
+
+This assumes nginx is already installed and running on the Pi. The generated image always
+stays inside the project folder (`output/dashboard.png`); nginx just serves that one file.
+
+**1. Get the project onto the Pi** (replace the URL with your repository's):
+
+```sh
+cd /home/pi
+git clone https://github.com/YOUR_USER/kobo-dashboard.git
+cd kobo-dashboard
+```
+
+**2. Install dependencies.** Pillow and requests come from apt (reliable on Raspberry Pi
+OS), the rest from pip inside a virtual environment that can see the apt packages:
 
 ```sh
 sudo apt install python3-pil python3-requests fonts-dejavu-core
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install -r server/requirements.txt
 ```
 
-Or, with pip in a virtual environment: `pip install -r server/requirements.txt`
-(you still need the DejaVu fonts: `fonts-dejavu-core`).
-
-**2. Generate an image:**
+**3. Create your config** from the template and edit it (see
+[Configuration](#configuration)):
 
 ```sh
-python3 server/dashboard.py /home/pi/www/dashboard.png
+cp config.example.ini config.ini
+nano config.ini
 ```
 
-**3. Serve it over plain HTTP** so the Kobo can fetch it. Plain HTTP on your home network
-is deliberate: the old Kobo firmware may struggle with modern HTTPS certificates.
+**4. Generate the image once** to check that everything works:
 
 ```sh
-mkdir -p /home/pi/www
-python3 -m http.server 8080 --directory /home/pi/www
+.venv/bin/python server/dashboard.py
 ```
 
-Any web server works (nginx, Apache) if you prefer something permanent. To keep the Python
-one running at boot, wrap it in a systemd service.
+This writes `/home/pi/kobo-dashboard/output/dashboard.png`. Open it (for example copy it
+to your computer with `scp`) to check how it looks.
 
-**4. Regenerate every 30 minutes** with cron (`crontab -e`):
+**5. Add the image to nginx.** Inside your existing `server { ... }` block (for example in
+`/etc/nginx/sites-available/default`), add:
 
-```cron
-*/30 * * * * /usr/bin/python3 /home/pi/kobo-dashboard/server/dashboard.py /home/pi/www/dashboard.png
+```nginx
+location = /dashboard.png {
+    alias /home/pi/kobo-dashboard/output/dashboard.png;
+    add_header Cache-Control "no-store";
+}
 ```
 
-The image is then reachable at `http://<pi-ip>:8080/dashboard.png`. Give the Pi a fixed IP
-(or a reserved DHCP lease on your router) so this address never changes.
+Then check the configuration and reload:
+
+```sh
+sudo nginx -t && sudo systemctl reload nginx
+curl -I http://192.168.1.135/dashboard.png
+```
+
+You should get `HTTP/1.1 200 OK` with `Content-Type: image/png`. The `=` makes this an
+exact match, so it takes priority over any `location /` you already have. `no-store`
+tells caches to always fetch the latest image.
+
+If you get **403 Forbidden**, nginx (user `www-data`) can't traverse your home directory.
+Allow it to pass through (without being able to list files):
+
+```sh
+chmod o+x /home/pi
+```
+
+**6. Regenerate the image every 30 minutes** with cron. This command adds the job without
+opening an editor:
+
+```sh
+(crontab -l 2>/dev/null; echo '*/30 * * * * /home/pi/kobo-dashboard/.venv/bin/python /home/pi/kobo-dashboard/server/dashboard.py >> /home/pi/kobo-dashboard/output/dashboard.log 2>&1') | crontab -
+```
+
+Errors (unreachable weather service, bad calendar URL, …) end up in
+`output/dashboard.log`. The image is written atomically, so nginx never serves a
+half-written file.
 
 ## Configuration
 
-Everything is at the top of `server/dashboard.py` unless noted.
+All your personal values live in **`config.ini`** at the project root. It is listed in
+`.gitignore`, so it never gets committed. The committed template is `config.example.ini`
+(with Montréal as the example location). The file is read each time the image is
+generated, so changes apply on the next run.
+
+| Section | Key | Meaning |
+|---|---|---|
+| `[location]` | `latitude`, `longitude` | Where the weather is for |
+| `[location]` | `timezone` | IANA time zone name, e.g. `America/Toronto` (also used to decide "today" and the noon switch) |
+| `[news]` | `feed_url` | RSS feed of headlines. Empty shows "Nouvelles non configurées" |
+| `[news]` | `headlines` | How many headlines to show (default 2) |
+| `[calendar]` | `ics_url` | Private iCal (.ics) address. Empty shows "Calendrier non configuré" |
+
+**Calendar URL:** in Google Calendar, use *Settings → your calendar → Integrate calendar →
+"Secret address in iCal format"*. Anyone with that address can read your calendar, so treat
+it like a password. This is exactly why it belongs in `config.ini` and never in the repo.
+`webcal://` addresses are accepted.
+
+**Other settings live in the code:**
 
 | Setting | Where | Notes |
 |---|---|---|
-| Location | `LAT`, `LON`, `TZ` | Defaults to Sherbrooke, Québec |
-| News feed | `NEWS_RSS` | The default Radio-Canada URL is a best guess: **verify it**. Any RSS feed with `<item><title>` works |
-| Number of headlines | `NB_TITRES` | Default 2 |
-| Calendar events | `EVENEMENTS` | Dummy list of `("HH:MM", "title")` for now |
-| Clothing rules | `clothes()` function | Thresholds: coat under 20°, boots and tuque under 5°, mittens under 0°, snow pants under -10°, umbrella if rain or 50%+ chance, sun hat if 25°+ and sunny |
-| Icons | `server/icons.py` | All drawn with Pillow primitives in a 100×100 virtual box |
-| Fonts | `FONT_CANDIDATES` | Tries a font next to the script, then Linux, Windows, macOS paths |
+| Clothing rules | `clothes()` in `server/dashboard.py` | Coat under 20°, boots and tuque under 5°, mittens under 0°, snow pants under -10°, umbrella if rain or 50%+ chance, sun hat if 25°+ and sunny |
+| Noon switch | `now.hour >= 12` in `draw_weather()` | When clothing icons switch to tomorrow |
+| Icons | `server/icons.py` | Drawn with Pillow primitives in a 100×100 virtual box |
+| Fonts | `FONT_CANDIDATES` in `server/draw_utils.py` | Tries a font next to the script, then Linux, Windows, macOS paths |
 
 Weather data comes from [Open-Meteo](https://open-meteo.com/) (no API key). It returns a
 standard WMO weather code and an `is_day` flag, which the script maps to an icon and a
@@ -147,8 +230,8 @@ the launcher setup and the terminal emulator used below.
 and copy the contents of `kobo/` into it. The scripts keep the image in a `Dashboard/`
 subfolder next to themselves.
 
-**4. Test the display.** Put any 600×800 PNG at `dash/Dashboard/dashboard.png`, enable wifi
-if you want, then run from KOReader's terminal emulator:
+**4. Test the display.** Put any 600×800 PNG at `dash/Dashboard/dashboard.png`, then run
+from KOReader's terminal emulator:
 
 ```sh
 sh /mnt/onboard/dash/kobo_loop_test.sh
@@ -156,14 +239,18 @@ sh /mnt/onboard/dash/kobo_loop_test.sh
 
 See [Keeping the Kobo awake](#keeping-the-kobo-awake) for how to read the result.
 
-**5. Connect to the Pi.** Edit `URL` in `kobo_fetch.sh` (or use the `DASH_URL` variable) to
-point to `http://<pi-ip>:8080/dashboard.png`, then:
+**5. Connect to the Pi.** `kobo_fetch.sh` already points to
+`http://192.168.1.135/dashboard.png`. If your Pi has another address, edit `URL` in the
+script or set `DASH_URL`. Turn wifi on, then:
 
 ```sh
 sh /mnt/onboard/dash/kobo_fetch.sh        # download only
 sh /mnt/onboard/dash/kobo_fetch.sh show   # download and display
 sh /mnt/onboard/dash/kobo_fetch.sh loop   # every 30 minutes
 ```
+
+Plain `http://` is deliberate: the old Kobo firmware may struggle with modern HTTPS
+certificates, and this only travels over your home network.
 
 Notes: the scripts assume `fbink` is bundled with KOReader at
 `/mnt/onboard/.adds/koreader/fbink`, and fall back to any `fbink` in the `PATH`. If neither
@@ -192,44 +279,35 @@ settings and test again. The final setup should stop KOReader and the stock Kobo
 while the loop runs, since they have their own sleep logic and will fight over the screen
 and wifi.
 
-## Testing without the hardware
-
-The generator has a demo mode that needs no network, useful on any computer:
-
-```sh
-python3 server/dashboard.py test.png --demo --temp -14 --code 71 --hour 9
-```
-
-| Flag | Meaning |
-|---|---|
-| `--demo` | Use fake weather and news instead of fetching |
-| `--temp N` | Fake current temperature in °C |
-| `--code N` | Fake WMO weather code (0 clear, 2 partly cloudy, 3 overcast, 61 rain, 71 snow, 95 storm) |
-| `--hour N` | Force the hour (before 12 shows today's clothing, 12+ shows tomorrow's) |
-| `--night` | Force night (moon icon) |
-
 ## Troubleshooting
 
+- **`Fichier de configuration introuvable`:** you haven't created `config.ini`. Run
+  `cp config.example.ini config.ini`.
+- **`Configuration invalide` or `Fuseau horaire inconnu`:** check the keys and values in
+  `config.ini` against `config.example.ini`. On Windows, time zones need
+  `pip install tzdata` (included in `requirements.txt`).
 - **Tiny text or broken accents (`d▯gag▯`):** the script couldn't find a TrueType font and
   fell back to Pillow's built-in bitmap font. It prints a warning. On Windows it should find
-  Arial automatically; otherwise put `DejaVuSans.ttf` and `DejaVuSans-Bold.ttf` next to
-  `dashboard.py`.
-- **"Météo indisponible" or "Nouvelles indisponibles" on the image:** the Pi couldn't reach
-  Open-Meteo or the RSS feed. The script logs the exact error to stderr. For news, check
-  `NEWS_RSS`.
+  Arial automatically; otherwise put `DejaVuSans.ttf` and `DejaVuSans-Bold.ttf` in `server/`.
+- **"Météo indisponible", "Nouvelles indisponibles" or "Calendrier indisponible" on the
+  image:** the Pi couldn't reach that source or couldn't read it. The exact error is in
+  `output/dashboard.log` (or on screen if you ran the script by hand).
+- **"Calendrier non configuré" / "Nouvelles non configurées":** `ics_url` / `feed_url` is
+  empty in `config.ini`.
+- **nginx returns 404:** `output/dashboard.png` doesn't exist yet (run the script once), or
+  the `alias` path doesn't match your install folder.
+- **nginx returns 403:** see the `chmod o+x /home/pi` step above.
 - **`fbink introuvable` on the Kobo:** see the note in [Kobo setup](#kobo-setup).
-- **Download fails on the Kobo:** check wifi, that the Pi's address is reachable from the
-  Kobo (`curl` it from the terminal), and prefer plain `http://` over `https://`.
+- **Download fails on the Kobo:** check wifi, and test the address from the Kobo's terminal
+  with `curl -I http://192.168.1.135/dashboard.png`.
 - **KOReader redraws over the image:** expected while KOReader owns the screen. It matters
   only for testing; the final setup stops it.
 - **The image is stale:** check the small clock in the bottom-right corner, then the cron
-  job on the Pi.
+  job and `output/dashboard.log` on the Pi.
 
 ## Roadmap
 
-- Real calendar: read a private `.ics` URL (Google Calendar, Outlook) on the Pi and show
-  today's events.
-- Verify and fix the news RSS feed; maybe pick headlines more carefully.
+- Test the calendar against a real Google Calendar / Outlook `.ics` feed.
 - Run the Kobo loop without KOReader and the stock software, with wifi on/off handling.
 - Try RTC wake for battery operation.
 - Optional: swap the hand-drawn weather icons for an icon set (e.g. the Weather Icons font)
@@ -241,4 +319,6 @@ python3 server/dashboard.py test.png --demo --temp -14 --code 71 --hour 9
 - Weather data: [Open-Meteo](https://open-meteo.com/)
 - E-ink drawing: [FBInk](https://github.com/NiLuJe/FBInk)
 - Reader software and launcher: [KOReader](https://github.com/koreader/koreader)
+- Calendar parsing: [icalendar](https://pypi.org/project/icalendar/) and
+  [recurring-ical-events](https://pypi.org/project/recurring-ical-events/)
 - Fonts: DejaVu Sans

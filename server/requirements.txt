@@ -1,2 +1,6 @@
 Pillow
 requests
+icalendar
+recurring-ical-events
+# Données de fuseaux horaires, nécessaires seulement sous Windows (pour tester en local)
+tzdata; sys_platform == "win32"

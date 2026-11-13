@@ -1,7 +1,15 @@
 __pycache__/
 *.pyc
-/dashboard.png
-server/dashboard.png
+
+# Configuration locale (contient des valeurs privées, dont l'adresse secrète du calendrier)
+config.ini
+
+# Image générée et journaux
+output/
+
+# Environnement Python
+.venv/
+
+# Fichiers créés sur la Kobo pendant les tests
 kobo/Dashboard/
 kobo/test_loop.log
-notes.txt

@@ -4,8 +4,9 @@
 # Installation : copier ce script dans un dossier de la Kobo (ex. /mnt/onboard/dash/).
 # L'image est enregistrée dans ./Dashboard/dashboard.png, à côté du script.
 #
-# Configuration : modifier URL ci-dessous, ou la passer par la variable DASH_URL :
-#   DASH_URL=http://192.168.1.50:8080/dashboard.png sh kobo_fetch.sh show
+# Configuration : l'adresse par défaut (192.168.1.135) est celle de l'exemple du README.
+# Modifiez URL ci-dessous, ou passez la vôtre par la variable DASH_URL :
+#   DASH_URL=http://192.168.1.50/dashboard.png sh kobo_fetch.sh show
 #
 # Usage :
 #   sh kobo_fetch.sh            -> télécharge seulement
@@ -14,7 +15,7 @@
 # Arrêt de la boucle : Ctrl-C
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-URL="${DASH_URL:-http://CHANGE_ME/dashboard.png}"
+URL="${DASH_URL:-http://192.168.1.135/dashboard.png}"
 OUT="$DIR/Dashboard/dashboard.png"
 INTERVAL=1800                               # secondes
 
