@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+/dashboard.png
+server/dashboard.png
+kobo/Dashboard/
+kobo/test_loop.log
+notes.txt
