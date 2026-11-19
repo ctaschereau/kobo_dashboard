@@ -6,7 +6,20 @@ config.ini, puis l'adapter.
 import configparser
 import os
 from dataclasses import dataclass
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+# zoneinfo est dans la bibliothèque standard depuis Python 3.9. Sur Python 3.7/3.8 (par ex. un
+# vieux Raspberry Pi OS), il faut le paquet de remplacement : pip install backports.zoneinfo
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:
+    try:
+        from backports.zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    except ImportError:
+        raise SystemExit(
+            "Le module zoneinfo est introuvable (il faut Python 3.9 ou plus).\n"
+            "Sur Python 3.7 ou 3.8, installez le paquet de remplacement :\n"
+            "    pip install backports.zoneinfo"
+        )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_CONFIG = os.path.join(ROOT, "config.ini")
