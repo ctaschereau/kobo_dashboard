@@ -11,5 +11,7 @@ output/
 .venv/
 
 # Fichiers créés sur la Kobo pendant les tests
+kobo/dashboard.conf
 kobo/dashboard.png
 kobo/fetch.log
+kobo/launcher.log

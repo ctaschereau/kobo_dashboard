@@ -1,16 +1,18 @@
 #!/bin/sh
 # Télécharge dashboard.png depuis le Raspberry Pi et l'affiche avec fbink.
 #
-# Installation : copier ce script dans un dossier de la Kobo (ex. /mnt/onboard/dash/).
+# Installation : copier ce script dans un dossier de la Kobo (ex. /mnt/onboard/.adds/dash/).
 # L'image est enregistrée à côté du script (dashboard.png), et la boucle tient un
 # journal à côté aussi (fetch.log).
 #
-# Configuration (modifier les valeurs ci-dessous, ou passer des variables) :
-#   DASH_URL        adresse de l'image (défaut : celle de l'exemple du README, 192.168.1.135)
-#   DASH_INTERVAL   secondes entre deux rafraîchissements en mode loop (défaut : 1800)
-#   FBINK           chemin de fbink (défaut : celui du PATH, normalement /usr/bin/fbink)
+# Réglages : fichier « dashboard.conf » à côté du script (modèle : dashboard.conf.example).
+# Des variables d'environnement de même nom, si elles sont définies, priment sur le fichier :
+#   DASH_URL         adresse de l'image (défaut : celle de l'exemple du README, 192.168.1.135)
+#   DASH_INTERVAL    secondes entre deux rafraîchissements en mode loop (défaut : 1800)
+#   DASH_MAX_LOOPS   nombre de tours avant d'arrêter la boucle, 0 = sans fin (défaut : 0)
+#   FBINK            chemin de fbink (défaut : celui du PATH, normalement /usr/bin/fbink)
 # Exemple :
-#   DASH_URL=http://192.168.1.50/dashboard.png sh kobo_fetch.sh show
+#   DASH_INTERVAL=300 sh kobo_fetch.sh loop
 #
 # Usage :
 #   sh kobo_fetch.sh            -> télécharge seulement
@@ -21,8 +23,17 @@
 PATH="$PATH:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"   # le terminal de KOReader a parfois un PATH minimal
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Réglages : dashboard.conf, puis les variables d'environnement par-dessus
+_url="$DASH_URL"; _interval="$DASH_INTERVAL"; _max="$DASH_MAX_LOOPS"
+[ -f "$DIR/dashboard.conf" ] && . "$DIR/dashboard.conf"
+[ -n "$_url" ] && DASH_URL="$_url"
+[ -n "$_interval" ] && DASH_INTERVAL="$_interval"
+[ -n "$_max" ] && DASH_MAX_LOOPS="$_max"
+
 URL="${DASH_URL:-http://192.168.1.135/dashboard.png}"
 INTERVAL="${DASH_INTERVAL:-1800}"
+MAX_LOOPS="${DASH_MAX_LOOPS:-0}"
 OUT="$DIR/dashboard.png"
 LOG="$DIR/fetch.log"
 FBINK="${FBINK:-$(command -v fbink)}"
@@ -73,11 +84,19 @@ log() {
 case "$1" in
     show) fetch && show ;;
     loop)
-        log "démarrage (intervalle ${INTERVAL}s)"
+        log "démarrage (intervalle ${INTERVAL}s, tours max : ${MAX_LOOPS})"
+        n=0
         while true; do
-            if ! fetch; then log "téléchargement échoué"
-            elif ! show; then log "affichage échoué"
+            # Les messages vont dans le journal, pas dans le terminal : un terminal qui
+            # affiche du texte redessine l'écran et abîme l'image.
+            if ! fetch >> "$LOG" 2>&1; then log "téléchargement échoué"
+            elif ! show >> "$LOG" 2>&1; then log "affichage échoué"
             else log "ok"
+            fi
+            n=$((n + 1))
+            if [ "$MAX_LOOPS" -gt 0 ] && [ "$n" -ge "$MAX_LOOPS" ]; then
+                log "nombre de tours atteint ($MAX_LOOPS), fin de la boucle"
+                break
             fi
             sleep "$INTERVAL"
         done

@@ -19,10 +19,11 @@ calendar, top headlines) and the Kobo downloads and displays it on a schedule.
 5. [Server setup (Raspberry Pi + nginx)](#server-setup-raspberry-pi--nginx)
 6. [Configuration](#configuration)
 7. [Kobo setup](#kobo-setup)
-8. [Keeping the Kobo awake](#keeping-the-kobo-awake)
-9. [Troubleshooting](#troubleshooting)
-10. [Roadmap](#roadmap)
-11. [Credits](#credits)
+8. [Running it like an app (KFMon launcher)](#running-it-like-an-app-kfmon-launcher)
+9. [Keeping the Kobo awake](#keeping-the-kobo-awake)
+10. [Troubleshooting](#troubleshooting)
+11. [Roadmap](#roadmap)
+12. [Credits](#credits)
 
 ## How it works
 
@@ -66,7 +67,8 @@ breaking the whole image, and the error is printed to stderr.
 | Weather (Open-Meteo) | Implemented; not yet verified end-to-end on the Pi |
 | News headlines | Implemented; the default Radio-Canada feed is listed as working by a third-party feed aggregator, not yet tested from the Pi |
 | Calendar (.ics) | Implemented (recurring events, all-day events, time zones); tested only with synthetic calendars, not yet with a real Google/Outlook one |
-| Kobo fetch + display script | Written; needs on-device testing |
+| Kobo fetch + display script | Working from KOReader's terminal (download and display tested on the Kobo Mini) |
+| KFMon launcher (icon in the library) | Written, **not yet tested on a Kobo**: wifi behaviour and screen orientation once Nickel is stopped are the open questions |
 | Staying awake / scheduled wake-up | Keep-awake test script provided; RTC wake untested |
 
 ## Repository layout
@@ -88,7 +90,12 @@ kobo_dashboard/
 │   ├── icons.py              hand-drawn weather and clothing icons
 │   └── requirements.txt      Python dependencies
 └── kobo/                     runs on the Kobo
-    └── kobo_fetch.sh         download the image, display it, or loop (with a log)
+    ├── kobo_fetch.sh         download the image, display it, or loop (with a log)
+    ├── dashboard.conf.example  settings for the Kobo scripts (copy to dashboard.conf)
+    ├── dashboard.sh          KFMon launcher: stops Nickel, runs the loop, reboots at the end
+    └── kfmon/
+        ├── dashboard.ini     KFMon watch config (makes the library icon launch the dashboard)
+        └── panneau.png       the icon that shows up in the Kobo library
 ```
 
 ## Example values used in this README
@@ -257,21 +264,27 @@ version, an intermediate firmware may be needed.)
 <https://github.com/koreader/koreader/wiki/Installation-on-Kobo-devices>. KOReader provides
 the launcher setup and the terminal emulator used below.
 
-**3. Copy the script.** Create a folder on the device, for example `/mnt/onboard/dash/`, and
-copy `kobo/kobo_fetch.sh` into it. The script saves the image as `dashboard.png` right next to
-itself, and the loop keeps a log (`fetch.log`) there too.
+**3. Copy the files.** Create a folder on the device, for example `/mnt/onboard/.adds/dash/` (a
+hidden `.adds` folder, so that Nickel doesn't import the downloaded image into your library as a
+"book"), and copy into it `kobo_fetch.sh` and a copy of `dashboard.conf.example` renamed to
+`dashboard.conf`. The script saves the image as `dashboard.png` right next to itself, and the
+loop keeps a log (`fetch.log`) there too.
 
-**4. Connect to the Pi.** `kobo_fetch.sh` already points to
-`http://192.168.1.135/dashboard.png`. If your Pi has another address, edit `URL` in the
-script or set `DASH_URL`. Turn wifi on, then run from KOReader's terminal emulator:
+**4. Edit `dashboard.conf`.** It already points to `http://192.168.1.135/dashboard.png` and
+refreshes every 5 minutes, which is handy for testing (use 1800 for 30 minutes in everyday
+use). If your Pi has another address, change `DASH_URL`. Environment variables with the same
+names override the file, for example `DASH_INTERVAL=60 sh kobo_fetch.sh loop`.
+
+**5. Run it** from KOReader's terminal emulator, with wifi on:
 
 ```sh
-sh /mnt/onboard/dash/kobo_fetch.sh        # download only
-sh /mnt/onboard/dash/kobo_fetch.sh show   # download and display
-sh /mnt/onboard/dash/kobo_fetch.sh loop   # download and display every 30 minutes
+sh /mnt/onboard/.adds/dash/kobo_fetch.sh        # download only
+sh /mnt/onboard/.adds/dash/kobo_fetch.sh show   # download and display
+sh /mnt/onboard/.adds/dash/kobo_fetch.sh loop   # download and display, again and again
 ```
 
-The interval of `loop` is set with `DASH_INTERVAL` (in seconds, default 1800).
+Running from KOReader's terminal is meant for testing: KOReader keeps owning the screen and may
+repaint parts of itself over the image. The launcher below avoids that.
 
 Plain `http://` is deliberate: the old Kobo firmware may struggle with modern HTTPS
 certificates, and this only travels over your home network.
@@ -289,13 +302,58 @@ fbink build"*. To install a full one:
 - **Restart the Kobo** afterwards: the install only takes effect on reboot.
 - Check with `which fbink`.
 
+## Running it like an app (KFMon launcher)
+
+A launcher turns the dashboard into an icon in the Kobo library: open it and the dashboard takes
+over the screen, with no terminal. It relies on [KFMon](https://github.com/NiLuJe/kfmon), which
+you already have if you installed KOReader with the one-click package. KFMon watches for a
+special "book" (a PNG icon) in the library and runs a program when you open it.
+
+**What happens when you open the icon:** KFMon runs `dashboard.sh`, which (1) syncs the disk,
+(2) stops Nickel, the stock Kobo software, using the same list of processes as KOReader's own
+launcher, (3) runs `kobo_fetch.sh loop`, and (4) reboots the Kobo when the loop ends, so it comes
+back to normal. With Nickel stopped, nothing puts the Kobo to sleep or draws over the image.
+KFMon stays running and refuses a second launch in the meantime.
+
+**Setup:**
+
+1. Copy `kobo_fetch.sh`, `dashboard.sh` and `dashboard.conf` into `/mnt/onboard/.adds/dash/`
+   (see [Kobo setup](#kobo-setup)).
+2. Copy `kobo/kfmon/panneau.png` to `/mnt/onboard/icons/` (create the folder if needed). It has to
+   be in a *visible* folder so that Nickel imports it into the library.
+3. Copy `kobo/kfmon/dashboard.ini` to `/mnt/onboard/.adds/kfmon/config/`.
+4. Eject the Kobo. KFMon picks up new watch configs after a USB session, and Nickel imports the
+   icon: a "panneau" entry appears in your library (to give it the title "Panneau Castor", set
+   `do_db_update = 1` in `dashboard.ini`, which writes to Nickel's database: it's off by default
+   because that is a bit risky).
+5. Turn wifi on in Nickel **before** opening the icon: it stays on once Nickel is stopped.
+
+**For your first tries,** set `DASH_MAX_LOOPS=3` in `dashboard.conf`: after three rounds the
+launcher reboots the Kobo by itself, so you can't get stuck.
+
+**Getting out:** wait for `DASH_MAX_LOOPS` to run out, or hold the power button until the LED
+blinks rapidly, which forces a reboot (this is how the TRMNL-for-Kobo project describes leaving its
+loop; the LED is blue on a Kobo Mini). To uninstall, delete `dashboard.ini` from KFMon's config
+folder and the icon from `icons/`.
+
+**Logs:** `launcher.log` (start-up, network interfaces, end) and `fetch.log` (one line per round)
+in `/mnt/onboard/.adds/dash/`.
+
+**What isn't verified yet:** I haven't been able to run this on a real Kobo Mini. The points to
+check on your device are whether wifi really stays up once Nickel is stopped (the author of KFMon
+says it does when it was on beforehand), whether the image keeps the right orientation, and whether
+the Kobo then stays awake (`fetch.log` shows gaps if it doesn't). Tell me what `launcher.log` says
+if something goes wrong.
+
 ## Keeping the Kobo awake
 
 By default a Kobo suspends after a few minutes and only wakes on a button press or USB
 plug-in. For a dashboard that refreshes on its own, there are three options:
 
 1. **Stay awake and plugged in (recommended first version).** A loop fetches, draws, and
-   sleeps. The e-ink screen holds the image with no power, so the idle cost is small.
+   sleeps. The e-ink screen holds the image with no power, so the idle cost is small. With the
+   [KFMon launcher](#running-it-like-an-app-kfmon-launcher), Nickel is stopped, so nothing
+   suspends the device (to be confirmed on your Kobo with `fetch.log`).
 2. **Wake with the hardware clock (RTC).** Program the RTC alarm, suspend, wake, refresh,
    repeat, for weeks of battery life. Untested on the Kobo Mini's old kernel.
 3. **Manual refresh.** Wake it by hand when you want fresh data.
@@ -304,7 +362,7 @@ plug-in. For a dashboard that refreshes on its own, there are three options:
 Kobo on its charger and without touching the screen:
 
 ```sh
-DASH_INTERVAL=60 sh /mnt/onboard/dash/kobo_fetch.sh loop
+DASH_INTERVAL=60 sh /mnt/onboard/.adds/dash/kobo_fetch.sh loop
 ```
 
 Each round downloads and redraws the image, then appends a line to `fetch.log` next to the
@@ -312,10 +370,9 @@ script (the last 500 lines are kept). A gap between two lines larger than the in
 the device suspended, and a "téléchargement échoué" or "affichage échoué" line tells you why
 nothing changed. The Pi must be reachable, since every round downloads the image.
 
-If it suspends while running under KOReader, disable KOReader's own auto-suspend in its
-settings and test again. The final setup should stop KOReader and the stock Kobo software
-while the loop runs, since they have their own sleep logic and will fight over the screen
-and wifi.
+If it suspends while running from KOReader's terminal, disable KOReader's own auto-suspend in its
+settings and test again. The launcher doesn't have this problem, since neither KOReader nor
+Nickel is running.
 
 ## Troubleshooting
 
@@ -355,9 +412,14 @@ and wifi.
   in [Kobo setup](#kobo-setup).
 - **`fbink introuvable`:** no `fbink` in the `PATH`. See the same section, or point to it with
   the `FBINK` variable.
-- **The terminal draws over the image after `show`:** expected, since KOReader's terminal
-  shares the screen. Use the `loop` modes for testing (they never return to the prompt) and
-  don't touch the screen; the final setup runs without KOReader.
+- **The terminal draws over the image (after `show`, or around it in `loop`):** expected, since
+  KOReader's terminal shares the screen. The `loop` mode keeps its messages out of the terminal
+  (they go to `fetch.log`), but KOReader may still repaint itself. Use the
+  [KFMon launcher](#running-it-like-an-app-kfmon-launcher), which runs without KOReader.
+- **Nothing happens when I open the icon:** check that `dashboard.ini` is in
+  `/mnt/onboard/.adds/kfmon/config/`, that `filename` matches the icon's real path and
+  `action` the real path of `dashboard.sh` (128 characters maximum each), and that the Kobo was
+  ejected from the computer afterwards. If `launcher.log` exists, the launcher did start: read it.
 - **Download fails on the Kobo:** check wifi, and test the address from the Kobo's terminal
   with `curl -I http://192.168.1.135/dashboard.png`.
 - **KOReader redraws over the image:** expected while KOReader owns the screen. It matters
@@ -368,7 +430,8 @@ and wifi.
 ## Roadmap
 
 - Test the calendar against a real Google Calendar / Outlook `.ics` feed.
-- Run the Kobo loop without KOReader and the stock software, with wifi on/off handling.
+- Validate the KFMon launcher on a real Kobo Mini (wifi, orientation, staying awake), then handle
+  wifi on/off between rounds.
 - Try RTC wake for battery operation.
 - Optional: swap the hand-drawn weather icons for an icon set (e.g. the Weather Icons font)
   if the current ones aren't polished enough.
