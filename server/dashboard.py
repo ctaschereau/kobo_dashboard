@@ -2,8 +2,9 @@
 """Génère dashboard.png (600x800, niveaux de gris) pour une Kobo Mini.
 
 Mise en page :
-  moitié haute  : météo actuelle (gauche) | habits à mettre (droite)
-  moitié basse  : calendrier du jour (gauche) | nouvelles (droite)
+  bandeau       : titre (gauche) | date et heure de mise à jour (droite)
+  bloc météo    : météo actuelle (gauche) | habits à mettre (droite)
+  bloc du bas   : calendrier du jour (gauche) | nouvelle (droite)
 Avant midi, les habits sont pour aujourd'hui. Après midi, pour demain.
 
 Configuration : config.ini à la racine du projet (voir config.example.ini).
@@ -29,7 +30,15 @@ from icons import icon_clothing, icon_weather
 
 # ---------- Mise en page ----------
 W, H = 600, 800
-MID_X, MID_Y = 300, 400
+MID_X = 300                       # séparateur vertical (gauche | droite)
+HEADER_H = 54                     # bandeau du titre
+WEATHER_H = 400                   # bloc météo
+MID_Y = HEADER_H + WEATHER_H      # séparateur horizontal météo / bas
+BOTTOM_TOP = MID_Y + 4            # début du bloc du bas
+BOTTOM_H = H - BOTTOM_TOP         # hauteur du bloc du bas
+
+MOIS_COURTS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.",
+               "août", "sept.", "oct.", "nov.", "déc."]
 
 
 # ---------- Logique météo ----------
@@ -168,8 +177,21 @@ def draw_weather(d, w, now):
         d.text((cx, cy + 92), lib, font=fit(d, lib, 136, 19, True), fill=0, anchor="mm")
 
 
+def draw_header(d, title, now):
+    """Bandeau du haut : titre à gauche, date/heure de mise à jour (petit) à droite."""
+    stamp1 = "Mis à jour"
+    stamp2 = f"{now.day} {MOIS_COURTS[now.month - 1]} à {now:%H:%M}"
+    f1, f2 = font(14), fit(d, stamp2, 150, 17, min_size=11)
+    stamp_w = max(d.textlength(stamp1, font=f1), d.textlength(stamp2, font=f2))
+    d.text((W - 20, 16), stamp1, font=f1, fill=0, anchor="rm")
+    d.text((W - 20, 36), stamp2, font=f2, fill=0, anchor="rm")
+    d.text((20, 26), title, font=fit(d, title, W - 40 - stamp_w - 16, 36, True),
+           fill=0, anchor="lm")
+
+
 def draw_calendar(d, events):
-    x, y, max_w, bottom = 20, 468, 265, 770
+    """Calendrier du jour (coordonnées locales au bloc du bas)."""
+    x, y, max_w, bottom = 20, 52, 265, BOTTOM_H - 8
     if isinstance(events, str):                       # message (non configuré, erreur)
         for line in wrap(d, events, font(22), max_w):
             d.text((x, y), line, font=font(22), fill=0)
@@ -179,58 +201,70 @@ def draw_calendar(d, events):
         d.text((x, y), "Rien de prévu", font=font(24), fill=0)
         return
     for n, (label, titre) in enumerate(events):
-        lines = wrap(d, titre, font(24), max_w, max_lines=2)
-        needed = 36 + 30 * len(lines) + 16
-        if y + needed > bottom:
+        lines = wrap(d, titre, font(22), max_w, max_lines=2)
+        needed = 30 + 26 * len(lines) + 12
+        reserve = 28 if n < len(events) - 1 else 0    # place pour « + N autres »
+        if y + needed + reserve > bottom:
             reste = len(events) - n
             d.text((x, y), f"+ {reste} autre{'s' if reste > 1 else ''}", font=font(22, True), fill=0)
             return
-        d.text((x, y), label, font=fit(d, label, max_w, 28, True), fill=0)
-        y += 36
+        d.text((x, y), label, font=fit(d, label, max_w, 26, True), fill=0)
+        y += 30
         for line in lines:
-            d.text((x, y), line, font=font(24), fill=0)
-            y += 30
-        y += 16
+            d.text((x, y), line, font=font(22), fill=0)
+            y += 26
+        y += 12
 
 
 def draw_news(d, headlines):
-    x, y, max_w = MID_X + 18, 468, 262
+    """Manchettes en police normale, autant que la place le permet (bloc du bas)."""
+    x, y, max_w, bottom = MID_X + 18, 52, 262, BOTTOM_H - 8
     if isinstance(headlines, str):
         for line in wrap(d, headlines, font(22), max_w):
             d.text((x, y), line, font=font(22), fill=0)
             y += 29
         return
     for t in headlines:
-        for line in wrap(d, t, font(23, True), max_w, max_lines=6):
-            d.text((x, y), line, font=font(23, True), fill=0)
+        dispo = (bottom - y) // 30
+        if dispo < 1:
+            break
+        for line in wrap(d, t, font(23), max_w, max_lines=min(dispo, 8)):
+            d.text((x, y), line, font=font(23), fill=0)
             y += 30
-        y += 18
+        y += 16
 
 
-def render(weather, headlines, events, now):
+def render(weather, headlines, events, now, title="Panneau Castor"):
     img = Image.new("L", (W, H), 255)
     d = ImageDraw.Draw(img)
 
+    draw_header(d, title, now)
+
+    # Bloc météo : dessiné dans sa propre image, puis collé sous le bandeau
+    wb = Image.new("L", (W, WEATHER_H), 255)
+    dw = ImageDraw.Draw(wb)
     if weather is not None:
-        draw_weather(d, weather, now)
+        draw_weather(dw, weather, now)
     else:
-        d.text((150, 200), "Météo\nindisponible", font=font(32, True), fill=0,
-               anchor="mm", align="center")
+        dw.text((150, 200), "Météo\nindisponible", font=font(32, True), fill=0,
+                anchor="mm", align="center")
+    img.paste(wb, (0, HEADER_H))
 
-    # En-têtes du bas
-    d.text((20, 418), "AUJOURD'HUI", font=font(24, True), fill=0)
-    d.text((MID_X + 18, 418), "NOUVELLES", font=font(24, True), fill=0)
-    d.line((20, 452, MID_X - 15, 452), fill=0, width=3)
-    d.line((MID_X + 18, 452, W - 20, 452), fill=0, width=3)
-    draw_calendar(d, events)
-    draw_news(d, headlines)
-
-    # Heure de mise à jour (pour repérer une image périmée)
-    d.text((W - 8, H - 4), f"{now:%H:%M}", font=font(13), fill=0, anchor="rd")
+    # Bloc du bas : calendrier | nouvelles
+    bb = Image.new("L", (W, BOTTOM_H), 255)
+    db = ImageDraw.Draw(bb)
+    db.text((20, 10), "AUJOURD'HUI", font=font(22, True), fill=0)
+    db.text((MID_X + 18, 10), "NOUVELLES", font=font(22, True), fill=0)
+    db.line((20, 40, MID_X - 15, 40), fill=0, width=3)
+    db.line((MID_X + 18, 40, W - 20, 40), fill=0, width=3)
+    draw_calendar(db, events)
+    draw_news(db, headlines)
+    img.paste(bb, (0, BOTTOM_TOP))
 
     # Séparateurs
+    d.line((0, HEADER_H - 2, W, HEADER_H - 2), fill=0, width=4)
     d.line((0, MID_Y, W, MID_Y), fill=0, width=4)
-    d.line((MID_X, 14, MID_X, MID_Y - 14), fill=0, width=3)
+    d.line((MID_X, HEADER_H + 14, MID_X, MID_Y - 14), fill=0, width=3)
     d.line((MID_X, MID_Y + 14, MID_X, H - 14), fill=0, width=3)
     return img
 
@@ -242,7 +276,7 @@ def main():
 
     cfg = load_config(a.config)
     now = datetime.now(cfg.tz)
-    img = render(*collect(cfg, now), now)
+    img = render(*collect(cfg, now), now, cfg.title)
 
     os.makedirs(os.path.dirname(DEFAULT_OUTPUT), exist_ok=True)
     tmp = DEFAULT_OUTPUT + ".tmp"

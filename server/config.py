@@ -21,6 +21,7 @@ class Config:
     news_url: str       # vide = nouvelles non configurées
     news_count: int
     calendar_url: str   # vide = calendrier non configuré
+    title: str = "Panneau Castor"   # titre affiché en haut de l'image
 
     @property
     def tz(self):
@@ -44,8 +45,9 @@ def load_config(path=None):
             longitude=cp.getfloat("location", "longitude"),
             timezone=cp.get("location", "timezone"),
             news_url=cp.get("news", "feed_url", fallback="").strip(),
-            news_count=cp.getint("news", "headlines", fallback=2),
+            news_count=cp.getint("news", "headlines", fallback=1),
             calendar_url=cp.get("calendar", "ics_url", fallback="").strip(),
+            title=cp.get("display", "title", fallback="").strip() or "Panneau Castor",
         )
     except (configparser.Error, ValueError) as e:
         raise SystemExit(f"Configuration invalide dans {path} : {e}")
