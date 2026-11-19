@@ -4,3 +4,5 @@ icalendar
 recurring-ical-events
 # Données de fuseaux horaires, nécessaires seulement sous Windows (pour tester en local)
 tzdata; sys_platform == "win32"
+# zoneinfo n'existe pas dans la bibliothèque standard avant Python 3.9
+backports.zoneinfo; python_version < "3.9"

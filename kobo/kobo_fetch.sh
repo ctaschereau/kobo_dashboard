@@ -2,35 +2,38 @@
 # Télécharge dashboard.png depuis le Raspberry Pi et l'affiche avec fbink.
 #
 # Installation : copier ce script dans un dossier de la Kobo (ex. /mnt/onboard/dash/).
-# L'image est enregistrée dans ./Dashboard/dashboard.png, à côté du script.
+# L'image est enregistrée à côté du script (dashboard.png), et la boucle tient un
+# journal à côté aussi (fetch.log).
 #
-# Configuration : l'adresse par défaut (192.168.1.135) est celle de l'exemple du README.
-# Modifiez URL ci-dessous, ou passez la vôtre par la variable DASH_URL :
+# Configuration (modifier les valeurs ci-dessous, ou passer des variables) :
+#   DASH_URL        adresse de l'image (défaut : celle de l'exemple du README, 192.168.1.135)
+#   DASH_INTERVAL   secondes entre deux rafraîchissements en mode loop (défaut : 1800)
+#   FBINK           chemin de fbink (défaut : celui du PATH, normalement /usr/bin/fbink)
+# Exemple :
 #   DASH_URL=http://192.168.1.50/dashboard.png sh kobo_fetch.sh show
 #
 # Usage :
 #   sh kobo_fetch.sh            -> télécharge seulement
 #   sh kobo_fetch.sh show       -> télécharge puis affiche
-#   sh kobo_fetch.sh loop       -> boucle : télécharge + affiche toutes les 30 min
+#   sh kobo_fetch.sh loop       -> boucle : télécharge + affiche, et note chaque tour dans fetch.log
 # Arrêt de la boucle : Ctrl-C
 
+PATH="$PATH:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"   # le terminal de KOReader a parfois un PATH minimal
+
 DIR="$(cd "$(dirname "$0")" && pwd)"
-. "$DIR/fbink_common.sh"      # PATH élargi + draw_image (choix d'un fbink qui gère les images)
-
 URL="${DASH_URL:-http://192.168.1.135/dashboard.png}"
-OUT="$DIR/Dashboard/dashboard.png"
-INTERVAL=1800                               # secondes
+INTERVAL="${DASH_INTERVAL:-1800}"
+OUT="$DIR/dashboard.png"
+LOG="$DIR/fetch.log"
+FBINK="${FBINK:-$(command -v fbink)}"
 
-mkdir -p "$(dirname "$OUT")"
-
-# Télécharge $URL vers le fichier $1, avec le premier outil disponible :
-# curl, sinon wget, sinon le wget de busybox. (HTTP simple : pas besoin de TLS.)
+# Télécharge $URL vers le fichier $1 avec le premier outil disponible (HTTP simple, sans TLS).
 download() {
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL --max-time 30 -o "$1" "$URL"
     elif command -v wget >/dev/null 2>&1; then
         wget -q -T 30 -O "$1" "$URL"
-    elif command -v busybox >/dev/null 2>&1 && busybox --list 2>/dev/null | grep -qx wget; then
+    elif busybox --list 2>/dev/null | grep -qx wget; then
         busybox wget -q -T 30 -O "$1" "$URL"
     else
         echo "Aucun outil de téléchargement trouvé (curl, wget, busybox wget)" >&2
@@ -50,11 +53,34 @@ fetch() {
 }
 
 show() {
-    draw_image "$OUT"
+    if [ ! -x "$FBINK" ]; then
+        echo "fbink introuvable (voir le README, section Kobo)" >&2
+        return 1
+    fi
+    "$FBINK" -f -g file="$OUT"
+}
+
+# Ajoute une ligne horodatée au journal (on garde les 500 dernières lignes).
+# Un écart entre deux lignes plus grand que l'intervalle = la Kobo s'est endormie.
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"
+    lines=$(wc -l < "$LOG")
+    if [ $((lines + 0)) -gt 500 ]; then
+        tail -n 500 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+    fi
 }
 
 case "$1" in
     show) fetch && show ;;
-    loop) while true; do fetch && show; sleep "$INTERVAL"; done ;;
-    *)    fetch ;;
+    loop)
+        log "démarrage (intervalle ${INTERVAL}s)"
+        while true; do
+            if ! fetch; then log "téléchargement échoué"
+            elif ! show; then log "affichage échoué"
+            else log "ok"
+            fi
+            sleep "$INTERVAL"
+        done
+        ;;
+    *) fetch ;;
 esac

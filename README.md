@@ -41,14 +41,18 @@ change than anything running on a 2012 e-reader.
 
 **Screen layout (600×800):**
 
-- **Top half, left:** big weather icon (sun, moon at night, clouds, rain, snow, fog,
+- **Header:** a title ("Panneau Castor" by default) with, in small text on the right, when
+  the image was last updated (for example "12 nov. à 11:00"), which makes a stale image easy
+  to spot.
+- **Weather block, left:** big weather icon (sun, moon at night, clouds, rain, snow, fog,
   storm), the condition in French, the current temperature, and the day's min/max.
-- **Top half, right:** up to 6 clothing icons for the children. Before noon they are for
+- **Weather block, right:** up to 6 clothing icons for the children. Before noon they are for
   today (based on the feels-like temperature); from noon on they switch to tomorrow
   (based on the average of tomorrow's min and max).
-- **Bottom half, left:** today's calendar events that are not over yet (all-day events
-  first). Shows "Calendrier non configuré" if no calendar URL is set.
-- **Bottom half, right:** the top headlines from a news RSS feed.
+- **Bottom block, left:** today's calendar events that are not over yet (all-day events
+  first), in a compact two-line format. Shows "+ N autres" when they don't all fit, and
+  "Calendrier non configuré" if no calendar URL is set.
+- **Bottom block, right:** the top news headline(s) in regular type, as many as fit.
 
 If a data source fails (no network, bad URL), that block shows a short French message
 ("Météo indisponible", "Nouvelles indisponibles", "Calendrier indisponible") instead of
@@ -79,13 +83,12 @@ kobo_dashboard/
 │   ├── dashboard.py          entry point: fetches data, lays out, writes the image
 │   ├── config.py             loads config.ini
 │   ├── calendar_events.py    reads an .ics URL, returns today's events
+│   ├── check_calendar.py     diagnostic: shows what the .ics contains and what gets displayed
 │   ├── draw_utils.py         fonts, text fitting and wrapping helpers
 │   ├── icons.py              hand-drawn weather and clothing icons
 │   └── requirements.txt      Python dependencies
 └── kobo/                     runs on the Kobo
-    ├── kobo_fetch.sh         download the image (and optionally display it, or loop)
-    ├── kobo_loop_test.sh     display a local image in a loop to test that the Kobo stays awake
-    └── fbink_common.sh       shared helper: finds an fbink build that can display images
+    └── kobo_fetch.sh         download the image, display it, or loop (with a log)
 ```
 
 ## Example values used in this README
@@ -216,12 +219,15 @@ generated, so changes apply on the next run.
 | `[location]` | `latitude`, `longitude` | Where the weather is for |
 | `[location]` | `timezone` | IANA time zone name, e.g. `America/Toronto` (also used to decide "today" and the noon switch) |
 | `[news]` | `feed_url` | RSS feed of headlines. Empty shows "Nouvelles non configurées" |
-| `[news]` | `headlines` | How many headlines to show (default 2) |
+| `[news]` | `headlines` | How many headlines to show (default 1; shows as many as fit, the last one may be truncated) |
+| `[display]` | `title` | Title in the header (default "Panneau Castor") |
 | `[calendar]` | `ics_url` | Private iCal (.ics) address. Empty shows "Calendrier non configuré" |
 
 **Calendar URL:** in Google Calendar, use *Settings → your calendar → Integrate calendar →
 "Secret address in iCal format"*. Anyone with that address can read your calendar, so treat
-it like a password. This is exactly why it belongs in `config.ini` and never in the repo.
+it like a password. This is exactly why it belongs in `config.ini` and never in the repo. If it
+ever leaks (pasted in a chat, committed by mistake), reset it from the same screen in Google
+Calendar (the *Reset* button next to the secret address) and put the new one in `config.ini`.
 `webcal://` addresses are accepted.
 
 **Other settings live in the code:**
@@ -251,50 +257,37 @@ version, an intermediate firmware may be needed.)
 <https://github.com/koreader/koreader/wiki/Installation-on-Kobo-devices>. KOReader provides
 the launcher setup and the terminal emulator used below.
 
-**3. Copy the scripts.** Create a folder on the device, for example `/mnt/onboard/dash/`,
-and copy the contents of `kobo/` into it. The scripts keep the image in a `Dashboard/`
-subfolder next to themselves.
+**3. Copy the script.** Create a folder on the device, for example `/mnt/onboard/dash/`, and
+copy `kobo/kobo_fetch.sh` into it. The script saves the image as `dashboard.png` right next to
+itself, and the loop keeps a log (`fetch.log`) there too.
 
-**4. Test the display.** Put any 600×800 PNG at `dash/Dashboard/dashboard.png`, then run
-from KOReader's terminal emulator:
-
-```sh
-sh /mnt/onboard/dash/kobo_loop_test.sh
-```
-
-See [Keeping the Kobo awake](#keeping-the-kobo-awake) for how to read the result.
-
-**5. Connect to the Pi.** `kobo_fetch.sh` already points to
+**4. Connect to the Pi.** `kobo_fetch.sh` already points to
 `http://192.168.1.135/dashboard.png`. If your Pi has another address, edit `URL` in the
-script or set `DASH_URL`. Turn wifi on, then:
+script or set `DASH_URL`. Turn wifi on, then run from KOReader's terminal emulator:
 
 ```sh
 sh /mnt/onboard/dash/kobo_fetch.sh        # download only
 sh /mnt/onboard/dash/kobo_fetch.sh show   # download and display
-sh /mnt/onboard/dash/kobo_fetch.sh loop   # every 30 minutes
+sh /mnt/onboard/dash/kobo_fetch.sh loop   # download and display every 30 minutes
 ```
+
+The interval of `loop` is set with `DASH_INTERVAL` (in seconds, default 1800).
 
 Plain `http://` is deliberate: the old Kobo firmware may struggle with modern HTTPS
 certificates, and this only travels over your home network.
 
-**FBInk with image support.** `fbink` is the tool that draws the image on the e-ink screen,
-but some builds (including the one bundled with KOReader) are "minimal" and refuse images
-with the error *"image support is disabled in this fbink build"*. The scripts therefore try
-several locations in order (the `FBINK` variable if set, `/usr/local/bin/fbink`,
-`/mnt/onboard/.adds/fbink/fbink`, KOReader's own copies, then the `PATH`) and skip any build
-that has no image support. If none works, install a full FBInk build:
+**FBInk with image support.** The scripts draw the image with the `fbink` command, taken from
+the `PATH` (normally `/usr/bin/fbink`). To use another binary:
+`FBINK=/path/to/fbink sh kobo_fetch.sh show`. It must be a **full** FBInk build: the one
+bundled with KOReader is a "minimal" build and fails with *"image support is disabled in this
+fbink build"*. To install a full one:
 
 - Get the Kobo package from NiLuJe's FBInk thread on MobileRead
   (<https://www.mobileread.com/forums/showthread.php?t=299110>), or from the FBInk releases
   on GitHub (<https://github.com/NiLuJe/FBInk/releases>), and follow the install
-  instructions there (for the Kobo package this is normally the usual `KoboRoot.tgz`
-  routine: copy it into `.kobo`, eject, wait for the reboot). FBInk supports the whole Kobo
-  lineup starting from the Kobo Touch, so the Mini is covered.
-- Afterwards, `ls /usr/local/bin/fbink` (or `which fbink`) tells you where it landed. To force
-  a specific binary: `FBINK=/path/to/fbink sh kobo_fetch.sh show`.
-
-I haven't verified the exact package file name or install location on a real Kobo Mini, so
-check the thread's instructions rather than trusting the paths above blindly.
+  instructions there (copy `KoboRoot.tgz` into `.kobo`, eject).
+- **Restart the Kobo** afterwards: the install only takes effect on reboot.
+- Check with `which fbink`.
 
 ## Keeping the Kobo awake
 
@@ -307,12 +300,17 @@ plug-in. For a dashboard that refreshes on its own, there are three options:
    repeat, for weeks of battery life. Untested on the Kobo Mini's old kernel.
 3. **Manual refresh.** Wake it by hand when you want fresh data.
 
-**Validating option 1:** run `kobo/kobo_loop_test.sh` for 30 minutes or more with the Kobo on
-its charger. It redraws the image at each interval, prints a counter and timestamp at the
-bottom of the screen, and appends to `test_loop.log`.
+**Validating option 1:** run the loop with a short interval for 30 minutes or more, with the
+Kobo on its charger and without touching the screen:
 
-- If the counter matches elapsed time divided by the interval, it never slept.
-- In the log, a gap between two lines larger than the interval means the device suspended.
+```sh
+DASH_INTERVAL=60 sh /mnt/onboard/dash/kobo_fetch.sh loop
+```
+
+Each round downloads and redraws the image, then appends a line to `fetch.log` next to the
+script (the last 500 lines are kept). A gap between two lines larger than the interval means
+the device suspended, and a "téléchargement échoué" or "affichage échoué" line tells you why
+nothing changed. The Pi must be reachable, since every round downloads the image.
 
 If it suspends while running under KOReader, disable KOReader's own auto-suspend in its
 settings and test again. The final setup should stop KOReader and the stock Kobo software
@@ -336,20 +334,36 @@ and wifi.
 - **"Météo indisponible", "Nouvelles indisponibles" or "Calendrier indisponible" on the
   image:** the Pi couldn't reach that source or couldn't read it. The exact error is in
   `output/dashboard.log` (or on screen if you ran the script by hand).
+- **The calendar says "Rien de prévu" but you have events:** run the diagnostic, which shows
+  what the calendar file contains and why each event is or isn't displayed:
+
+  ```sh
+  /home/pi/kobo_dashboard/.venv/bin/python /home/pi/kobo_dashboard/server/check_calendar.py
+  ```
+
+  The usual causes: today's events are **already over** (finished events are hidden, so in the
+  evening you often see "Rien de prévu"), the event was added very recently (Google can take
+  hours to update a secret `.ics` feed), or it is on another calendar than the one whose
+  address you configured. The diagnostic never prints the full URL.
 - **"Calendrier non configuré" / "Nouvelles non configurées":** `ics_url` / `feed_url` is
   empty in `config.ini`.
 - **nginx returns 404:** `output/dashboard.png` doesn't exist yet (run the script once), or
   the `alias` path doesn't match your install folder.
 - **nginx returns 403:** see the `chmod o+x /home/pi` step above.
 - **"image support is disabled in this fbink build" on the Kobo:** the fbink in use is a
-  minimal build. Install a full one, see "FBInk with image support" in
-  [Kobo setup](#kobo-setup). The scripts print which builds they skipped.
+  minimal build. Install a full one (and restart the Kobo), see "FBInk with image support"
+  in [Kobo setup](#kobo-setup).
+- **`fbink introuvable`:** no `fbink` in the `PATH`. See the same section, or point to it with
+  the `FBINK` variable.
+- **The terminal draws over the image after `show`:** expected, since KOReader's terminal
+  shares the screen. Use the `loop` modes for testing (they never return to the prompt) and
+  don't touch the screen; the final setup runs without KOReader.
 - **Download fails on the Kobo:** check wifi, and test the address from the Kobo's terminal
   with `curl -I http://192.168.1.135/dashboard.png`.
 - **KOReader redraws over the image:** expected while KOReader owns the screen. It matters
   only for testing; the final setup stops it.
-- **The image is stale:** check the small clock in the bottom-right corner, then the cron
-  job and `output/dashboard.log` on the Pi.
+- **The image is stale:** check the "Mis à jour" stamp in the header, then the cron job and
+  `output/dashboard.log` on the Pi.
 
 ## Roadmap
 
