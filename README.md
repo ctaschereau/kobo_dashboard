@@ -68,7 +68,7 @@ breaking the whole image, and the error is printed to stderr.
 ## Repository layout
 
 ```
-kobo-dashboard/
+kobo_dashboard/
 ├── README.md
 ├── config.example.ini        template for your private config (copy to config.ini)
 ├── config.ini                YOUR config: not committed (.gitignore)
@@ -95,7 +95,7 @@ So that the commands can be copy-pasted as they are, the README assumes:
 |---|---|
 | Raspberry Pi address | `192.168.1.135` |
 | Pi user | `pi` |
-| Project folder on the Pi | `/home/pi/kobo-dashboard` |
+| Project folder on the Pi | `/home/pi/kobo_dashboard` |
 | Location | Montréal (`45.5017`, `-73.5673`) |
 
 Replace them with your own where they differ. Give the Pi a fixed IP (or a reserved DHCP
@@ -110,8 +110,8 @@ stays inside the project folder (`output/dashboard.png`); nginx just serves that
 
 ```sh
 cd /home/pi
-git clone https://github.com/YOUR_USER/kobo-dashboard.git
-cd kobo-dashboard
+git clone https://github.com/YOUR_USER/kobo_dashboard.git
+cd kobo_dashboard
 ```
 
 **2. Install dependencies.** Pillow and requests come from apt (reliable on Raspberry Pi
@@ -137,29 +137,53 @@ nano config.ini
 .venv/bin/python server/dashboard.py
 ```
 
-This writes `/home/pi/kobo-dashboard/output/dashboard.png`. Open it (for example copy it
+This writes `/home/pi/kobo_dashboard/output/dashboard.png`. Open it (for example copy it
 to your computer with `scp`) to check how it looks.
 
-**5. Add the image to nginx.** Inside your existing `server { ... }` block (for example in
-`/etc/nginx/sites-available/default`), add:
+**5. Add a small nginx server block for the Kobo.** If your existing sites are HTTPS-only
+(for example with Certbot and a redirect from port 80), don't put the `location` inside
+those blocks: the Kobo would get redirected to HTTPS, and Certbot manages those blocks.
+Add a separate `server { }` block instead, in the same file, **after** the existing ones
+and at the same level (not inside another block):
 
 ```nginx
-location = /dashboard.png {
-    alias /home/pi/kobo-dashboard/output/dashboard.png;
-    add_header Cache-Control "no-store";
+server {
+    listen 80;
+    server_name 192.168.1.135;
+
+    # Only allow devices on the home network
+    allow 192.168.1.0/24;
+    deny all;
+
+    location = /dashboard.png {
+        alias /home/pi/kobo_dashboard/output/dashboard.png;
+        add_header Cache-Control "no-store";
+    }
+
+    location / {
+        return 404;
+    }
 }
 ```
 
-Then check the configuration and reload:
+Then check the configuration, reload, and test:
 
 ```sh
 sudo nginx -t && sudo systemctl reload nginx
 curl -I http://192.168.1.135/dashboard.png
 ```
 
-You should get `HTTP/1.1 200 OK` with `Content-Type: image/png`. The `=` makes this an
-exact match, so it takes priority over any `location /` you already have. `no-store`
-tells caches to always fetch the latest image.
+You should get `HTTP/1.1 200 OK` with `Content-Type: image/png`.
+
+- nginx picks the server block from the host name in the request, so requests to
+  `192.168.1.135` land here, while your domain keeps going to its own HTTPS blocks.
+- The `allow`/`deny` lines restrict the image to your home network (adjust
+  `192.168.1.0/24` to your range). This matters if your domain is public, since the image
+  shows your calendar events.
+- `no-store` tells caches to always fetch the latest image, and `location / { return 404; }`
+  keeps nginx from serving a default page on that address.
+- A `location` directive outside a `server { }` block makes nginx fail with
+  `"location" directive is not allowed here`.
 
 If you get **403 Forbidden**, nginx (user `www-data`) can't traverse your home directory.
 Allow it to pass through (without being able to list files):
@@ -172,7 +196,7 @@ chmod o+x /home/pi
 opening an editor:
 
 ```sh
-(crontab -l 2>/dev/null; echo '*/30 * * * * /home/pi/kobo-dashboard/.venv/bin/python /home/pi/kobo-dashboard/server/dashboard.py >> /home/pi/kobo-dashboard/output/dashboard.log 2>&1') | crontab -
+(crontab -l 2>/dev/null; echo '*/30 * * * * /home/pi/kobo_dashboard/.venv/bin/python /home/pi/kobo_dashboard/server/dashboard.py >> /home/pi/kobo_dashboard/output/dashboard.log 2>&1') | crontab -
 ```
 
 Errors (unreachable weather service, bad calendar URL, …) end up in
@@ -281,6 +305,10 @@ and wifi.
 
 ## Troubleshooting
 
+- **`ModuleNotFoundError: No module named 'icalendar'` (or another module), e.g. on
+  Windows:** dependencies aren't installed. Run `py -m pip install -r server\requirements.txt`
+  (the `apt` commands are for the Pi only). `icalendar` is only needed when a calendar URL is
+  set in `config.ini`.
 - **`Fichier de configuration introuvable`:** you haven't created `config.ini`. Run
   `cp config.example.ini config.ini`.
 - **`Configuration invalide` or `Fuseau horaire inconnu`:** check the keys and values in

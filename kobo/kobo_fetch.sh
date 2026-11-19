@@ -14,6 +14,9 @@
 #   sh kobo_fetch.sh loop       -> boucle : télécharge + affiche toutes les 30 min
 # Arrêt de la boucle : Ctrl-C
 
+# Le terminal de KOReader a parfois un PATH minimal : on y ajoute les dossiers usuels.
+PATH="$PATH:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
+
 DIR="$(cd "$(dirname "$0")" && pwd)"
 URL="${DASH_URL:-http://192.168.1.135/dashboard.png}"
 OUT="$DIR/Dashboard/dashboard.png"
@@ -25,14 +28,28 @@ FBINK="/mnt/onboard/.adds/koreader/fbink"
 
 mkdir -p "$(dirname "$OUT")"
 
+# Télécharge $URL vers le fichier $1, avec le premier outil disponible :
+# curl, sinon wget, sinon le wget de busybox. (HTTP simple : pas besoin de TLS.)
+download() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --max-time 30 -o "$1" "$URL"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q -T 30 -O "$1" "$URL"
+    elif command -v busybox >/dev/null 2>&1 && busybox --list 2>/dev/null | grep -qx wget; then
+        busybox wget -q -T 30 -O "$1" "$URL"
+    else
+        echo "Aucun outil de téléchargement trouvé (curl, wget, busybox wget)" >&2
+        return 1
+    fi
+}
+
 fetch() {
-    # -f : échoue sur erreur HTTP, -L : suit les redirections
-    if curl -fsSL --max-time 30 -o "$OUT.tmp" "$URL"; then
+    if download "$OUT.tmp" && [ -s "$OUT.tmp" ]; then
         mv "$OUT.tmp" "$OUT"
         echo "OK : image téléchargée ($(wc -c < "$OUT") octets)"
         return 0
     fi
-    echo "ÉCHEC du téléchargement de $URL (wifi ? adresse ? HTTPS ?)" >&2
+    echo "ÉCHEC du téléchargement de $URL (wifi ? adresse ?)" >&2
     rm -f "$OUT.tmp"
     return 1
 }

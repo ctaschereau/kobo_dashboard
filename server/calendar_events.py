@@ -4,8 +4,6 @@
 """
 from datetime import date, datetime, timedelta
 
-import icalendar
-import recurring_ical_events
 import requests
 
 
@@ -23,6 +21,10 @@ def todays_events(ics_url, tz, now):
     (« 08:30 ») ou « Journée » pour un événement sur toute la journée.
     Lève une exception si le calendrier est inaccessible ou illisible.
     """
+    # Importées ici : ces bibliothèques ne sont nécessaires que si une URL de calendrier est configurée.
+    import icalendar
+    import recurring_ical_events
+
     url = ics_url.replace("webcal://", "https://", 1)
     r = requests.get(url, timeout=20)
     r.raise_for_status()
