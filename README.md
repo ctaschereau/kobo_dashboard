@@ -84,7 +84,8 @@ kobo_dashboard/
 │   └── requirements.txt      Python dependencies
 └── kobo/                     runs on the Kobo
     ├── kobo_fetch.sh         download the image (and optionally display it, or loop)
-    └── kobo_loop_test.sh     display a local image in a loop to test that the Kobo stays awake
+    ├── kobo_loop_test.sh     display a local image in a loop to test that the Kobo stays awake
+    └── fbink_common.sh       shared helper: finds an fbink build that can display images
 ```
 
 ## Example values used in this README
@@ -276,9 +277,24 @@ sh /mnt/onboard/dash/kobo_fetch.sh loop   # every 30 minutes
 Plain `http://` is deliberate: the old Kobo firmware may struggle with modern HTTPS
 certificates, and this only travels over your home network.
 
-Notes: the scripts assume `fbink` is bundled with KOReader at
-`/mnt/onboard/.adds/koreader/fbink`, and fall back to any `fbink` in the `PATH`. If neither
-exists, download a standalone FBInk build for Kobo from its GitHub releases.
+**FBInk with image support.** `fbink` is the tool that draws the image on the e-ink screen,
+but some builds (including the one bundled with KOReader) are "minimal" and refuse images
+with the error *"image support is disabled in this fbink build"*. The scripts therefore try
+several locations in order (the `FBINK` variable if set, `/usr/local/bin/fbink`,
+`/mnt/onboard/.adds/fbink/fbink`, KOReader's own copies, then the `PATH`) and skip any build
+that has no image support. If none works, install a full FBInk build:
+
+- Get the Kobo package from NiLuJe's FBInk thread on MobileRead
+  (<https://www.mobileread.com/forums/showthread.php?t=299110>), or from the FBInk releases
+  on GitHub (<https://github.com/NiLuJe/FBInk/releases>), and follow the install
+  instructions there (for the Kobo package this is normally the usual `KoboRoot.tgz`
+  routine: copy it into `.kobo`, eject, wait for the reboot). FBInk supports the whole Kobo
+  lineup starting from the Kobo Touch, so the Mini is covered.
+- Afterwards, `ls /usr/local/bin/fbink` (or `which fbink`) tells you where it landed. To force
+  a specific binary: `FBINK=/path/to/fbink sh kobo_fetch.sh show`.
+
+I haven't verified the exact package file name or install location on a real Kobo Mini, so
+check the thread's instructions rather than trusting the paths above blindly.
 
 ## Keeping the Kobo awake
 
@@ -325,7 +341,9 @@ and wifi.
 - **nginx returns 404:** `output/dashboard.png` doesn't exist yet (run the script once), or
   the `alias` path doesn't match your install folder.
 - **nginx returns 403:** see the `chmod o+x /home/pi` step above.
-- **`fbink introuvable` on the Kobo:** see the note in [Kobo setup](#kobo-setup).
+- **"image support is disabled in this fbink build" on the Kobo:** the fbink in use is a
+  minimal build. Install a full one, see "FBInk with image support" in
+  [Kobo setup](#kobo-setup). The scripts print which builds they skipped.
 - **Download fails on the Kobo:** check wifi, and test the address from the Kobo's terminal
   with `curl -I http://192.168.1.135/dashboard.png`.
 - **KOReader redraws over the image:** expected while KOReader owns the screen. It matters

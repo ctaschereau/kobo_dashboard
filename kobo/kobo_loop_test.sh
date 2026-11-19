@@ -15,16 +15,10 @@ IMG="$DIR/Dashboard/dashboard.png"
 LOG="$DIR/test_loop.log"
 INTERVAL="${1:-60}"
 
-# fbink : celui de KOReader, sinon dans le PATH
-FBINK="/mnt/onboard/.adds/koreader/fbink"
-[ -x "$FBINK" ] || FBINK="$(command -v fbink)"
+. "$DIR/fbink_common.sh"      # PATH élargi + draw_image (choix d'un fbink qui gère les images)
 
 if [ ! -f "$IMG" ]; then
     echo "Image introuvable : $IMG" >&2
-    exit 1
-fi
-if [ -z "$FBINK" ]; then
-    echo "fbink introuvable" >&2
     exit 1
 fi
 
@@ -37,8 +31,11 @@ while true; do
     now="$(date '+%Y-%m-%d %H:%M:%S')"
 
     # Affiche l'image (-f : rafraîchissement complet), puis un compteur en bas de l'écran
-    "$FBINK" -f -g file="$IMG"
-    "$FBINK" -y -1 "#$n  $now"
+    if draw_image "$IMG"; then
+        "$FBINK_USED" -y -1 "#$n  $now"
+    else
+        echo "Affichage impossible (voir le message ci-dessus)" >&2
+    fi
 
     echo "$n $now" >> "$LOG"
     sleep "$INTERVAL"

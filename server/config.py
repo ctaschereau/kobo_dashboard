@@ -50,11 +50,14 @@ def load_config(path=None):
     except (configparser.Error, ValueError) as e:
         raise SystemExit(f"Configuration invalide dans {path} : {e}")
 
+    # Valide le fuseau horaire : introuvable (faute de frappe, ou tzdata absent sous Windows)
+    # ou valeur invalide (vide, chemin bizarre) -> message clair plutôt qu'une trace d'erreur.
     try:
         cfg.tz
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, ValueError):
         raise SystemExit(
-            f"Fuseau horaire inconnu : {cfg.timezone!r} "
-            f"(sous Windows : pip install tzdata)"
+            f"Fuseau horaire inconnu : {cfg.timezone!r}\n"
+            f"Vérifiez l'orthographe dans config.ini (exemple : America/Toronto). "
+            f"Sous Windows, installez aussi les données de fuseaux : pip install tzdata"
         )
     return cfg

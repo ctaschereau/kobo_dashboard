@@ -14,17 +14,12 @@
 #   sh kobo_fetch.sh loop       -> boucle : télécharge + affiche toutes les 30 min
 # Arrêt de la boucle : Ctrl-C
 
-# Le terminal de KOReader a parfois un PATH minimal : on y ajoute les dossiers usuels.
-PATH="$PATH:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
-
 DIR="$(cd "$(dirname "$0")" && pwd)"
+. "$DIR/fbink_common.sh"      # PATH élargi + draw_image (choix d'un fbink qui gère les images)
+
 URL="${DASH_URL:-http://192.168.1.135/dashboard.png}"
 OUT="$DIR/Dashboard/dashboard.png"
 INTERVAL=1800                               # secondes
-
-# fbink : essaie celui de KOReader, sinon dans le PATH
-FBINK="/mnt/onboard/.adds/koreader/fbink"
-[ -x "$FBINK" ] || FBINK="$(command -v fbink)"
 
 mkdir -p "$(dirname "$OUT")"
 
@@ -55,12 +50,7 @@ fetch() {
 }
 
 show() {
-    if [ -z "$FBINK" ]; then
-        echo "fbink introuvable" >&2
-        return 1
-    fi
-    # -f : rafraîchissement complet, -g : affiche une image
-    "$FBINK" -f -g file="$OUT"
+    draw_image "$OUT"
 }
 
 case "$1" in
