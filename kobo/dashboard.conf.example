@@ -1,0 +1,14 @@
+# Réglages du tableau de bord sur la Kobo.
+# Copiez ce fichier en « dashboard.conf », dans le même dossier que kobo_fetch.sh, puis adaptez-le.
+# C'est un fichier de variables shell : pas d'espaces autour du « = ».
+
+# Adresse de l'image sur le Raspberry Pi
+DASH_URL=http://192.168.1.135/dashboard.png
+
+# Secondes entre deux rafraîchissements : 300 = 5 minutes (pour tester), 1800 = 30 minutes
+DASH_INTERVAL=300
+
+# Nombre de tours avant que la boucle s'arrête (et que le lanceur redémarre la Kobo).
+# 0 = sans fin. Mettez 3 ou 4 pour vos premiers essais avec le lanceur : la Kobo revient
+# toute seule à la normale.
+DASH_MAX_LOOPS=0
