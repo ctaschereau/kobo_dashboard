@@ -46,6 +46,11 @@ else
     echo "(Nickel ne tourne pas : normal dans le terminal de KOReader. Voir launcher.log)"
 fi
 
+echo; echo "== boutons et écran tactile (pour pouvoir quitter avec le bouton d'alimentation) =="
+cat /proc/bus/input/devices 2>&1
+ls -la /dev/input/ 2>&1
+echo "outils : $(for t in od hexdump xxd dd timeout evtest qndb; do command -v $t >/dev/null 2>&1 && printf '%s ' $t; done)"
+
 echo; echo "== processus en cours =="
 ps 2>&1 | head -40
 

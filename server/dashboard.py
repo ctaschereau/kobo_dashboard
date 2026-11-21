@@ -26,6 +26,7 @@ from PIL import Image, ImageDraw
 from calendar_events import todays_events
 from config import DEFAULT_OUTPUT, load_config
 from draw_utils import fit, font, wrap
+from hockey import yesterdays_game
 from icons import icon_clothing, icon_weather
 
 # ---------- Mise en page ----------
@@ -142,7 +143,14 @@ def collect(cfg, now):
             print("Calendrier indisponible :", e, file=sys.stderr)
             events = "Calendrier indisponible"
 
-    return weather, headlines, events
+    game = None
+    if cfg.team:
+        try:
+            game = yesterdays_game(cfg.team, now)
+        except Exception as e:                  # le hockey est facultatif : jamais bloquant
+            print("Résultat de hockey indisponible :", e, file=sys.stderr)
+
+    return weather, headlines, events, game
 
 
 # ---------- Dessin ----------
@@ -216,9 +224,23 @@ def draw_calendar(d, events):
         y += 12
 
 
-def draw_news(d, headlines):
+def draw_game(d, game, x, y, max_w=262):
+    """Résultat de la veille : deux lignes (le gagnant en gras). Retourne le y suivant."""
+    (_, s1), (_, s2) = game["lignes"]
+    gagnant = 0 if s1 > s2 else 1
+    for i, (nom, score) in enumerate(game["lignes"]):
+        texte = f"{nom} : {score}"
+        d.text((x, y), texte, font=fit(d, texte, max_w, 26, i == gagnant), fill=0)
+        y += 32
+    if game["suite"]:
+        d.text((x, y), game["suite"], font=font(18), fill=0)
+        y += 24
+    return y
+
+
+def draw_news(d, headlines, top=52):
     """Manchettes en police normale, autant que la place le permet (bloc du bas)."""
-    x, y, max_w, bottom = MID_X + 18, 52, 262, BOTTOM_H - 8
+    x, y, max_w, bottom = MID_X + 18, top, 262, BOTTOM_H - 8
     if isinstance(headlines, str):
         for line in wrap(d, headlines, font(22), max_w):
             d.text((x, y), line, font=font(22), fill=0)
@@ -234,7 +256,7 @@ def draw_news(d, headlines):
         y += 16
 
 
-def render(weather, headlines, events, now, title="Panneau Castor"):
+def render(weather, headlines, events, game, now, title="Panneau Castor"):
     img = Image.new("L", (W, H), 255)
     d = ImageDraw.Draw(img)
 
@@ -253,12 +275,21 @@ def render(weather, headlines, events, now, title="Panneau Castor"):
     # Bloc du bas : calendrier | nouvelles
     bb = Image.new("L", (W, BOTTOM_H), 255)
     db = ImageDraw.Draw(bb)
+    xr = MID_X + 18                                   # colonne de droite
     db.text((20, 10), "AUJOURD'HUI", font=font(22, True), fill=0)
-    db.text((MID_X + 18, 10), "NOUVELLES", font=font(22, True), fill=0)
     db.line((20, 40, MID_X - 15, 40), fill=0, width=3)
-    db.line((MID_X + 18, 40, W - 20, 40), fill=0, width=3)
     draw_calendar(db, events)
-    draw_news(db, headlines)
+    if game:                                          # « Hier » au-dessus des nouvelles
+        db.text((xr, 10), "HIER", font=font(22, True), fill=0)
+        db.line((xr, 40, W - 20, 40), fill=0, width=3)
+        y = draw_game(db, game, xr, 52) + 10
+        db.text((xr, y), "NOUVELLES", font=font(22, True), fill=0)
+        db.line((xr, y + 30, W - 20, y + 30), fill=0, width=3)
+        draw_news(db, headlines, y + 42)
+    else:
+        db.text((xr, 10), "NOUVELLES", font=font(22, True), fill=0)
+        db.line((xr, 40, W - 20, 40), fill=0, width=3)
+        draw_news(db, headlines)
     img.paste(bb, (0, BOTTOM_TOP))
 
     # Séparateurs

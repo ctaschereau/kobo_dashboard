@@ -32,7 +32,7 @@ calendar, top headlines) and the Kobo downloads and displays it on a schedule.
  News RSS feed         ─┼─►  Raspberry Pi                       Kobo Mini
  Calendar (.ics URL)   ─┘    server/dashboard.py                kobo/kobo_fetch.sh
                              writes output/dashboard.png  ──►    curl the PNG, show it with FBInk
-                             (cron, every 30 min)                (loop, every 30 min)
+                             (cron, every 15 min)                (loop, every 15 min)
                              nginx serves that one file
 ```
 
@@ -53,7 +53,10 @@ change than anything running on a 2012 e-reader.
 - **Bottom block, left:** today's calendar events that are not over yet (all-day events
   first), in a compact two-line format. Shows "+ N autres" when they don't all fit, and
   "Calendrier non configuré" if no calendar URL is set.
-- **Bottom block, right:** the top news headline(s) in regular type, as many as fit.
+- **Bottom block, right:** the top news headline(s) in regular type, as many as fit. If your NHL
+  team (the Canadiens by default) played yesterday, a "Hier" section with the final score
+  (winner in bold, "Prolongation" or "Fusillade" when relevant) goes above the headlines, which
+  then get less room. No game, no section.
 
 If a data source fails (no network, bad URL), that block shows a short French message
 ("Météo indisponible", "Nouvelles indisponibles", "Calendrier indisponible") instead of
@@ -66,6 +69,7 @@ breaking the whole image, and the error is printed to stderr.
 | Image generator (layout, icons, French text, day/night) | Working, tested with simulated data |
 | Weather (Open-Meteo) | Implemented; not yet verified end-to-end on the Pi |
 | News headlines | Implemented; the default Radio-Canada feed is listed as working by a third-party feed aggregator, not yet tested from the Pi |
+| Yesterday's NHL game | Implemented with the public NHL API; tested only against simulated responses |
 | Calendar (.ics) | Implemented (recurring events, all-day events, time zones); tested only with synthetic calendars, not yet with a real Google/Outlook one |
 | Kobo fetch + display script | Working from KOReader's terminal (download and display tested on the Kobo Mini) |
 | Battery saving (wifi off between rounds, RTC wake-up) | **Not implemented yet**: needs details from a real Kobo Mini, which `probe.sh` collects |
@@ -86,6 +90,7 @@ kobo_dashboard/
 │   ├── dashboard.py          entry point: fetches data, lays out, writes the image
 │   ├── config.py             loads config.ini
 │   ├── calendar_events.py    reads an .ics URL, returns today's events
+│   ├── hockey.py             yesterday's result for an NHL team
 │   ├── check_calendar.py     diagnostic: shows what the .ics contains and what gets displayed
 │   ├── draw_utils.py         fonts, text fitting and wrapping helpers
 │   ├── icons.py              hand-drawn weather and clothing icons
@@ -205,11 +210,17 @@ Allow it to pass through (without being able to list files):
 chmod o+x /home/pi
 ```
 
-**6. Regenerate the image every 30 minutes** with cron. This command adds the job without
+**6. Regenerate the image every 15 minutes** with cron. This command adds the job without
 opening an editor:
 
 ```sh
-(crontab -l 2>/dev/null; echo '*/30 * * * * /home/pi/kobo_dashboard/.venv/bin/python /home/pi/kobo_dashboard/server/dashboard.py >> /home/pi/kobo_dashboard/output/dashboard.log 2>&1') | crontab -
+(crontab -l 2>/dev/null; echo '*/15 * * * * /home/pi/kobo_dashboard/.venv/bin/python /home/pi/kobo_dashboard/server/dashboard.py >> /home/pi/kobo_dashboard/output/dashboard.log 2>&1') | crontab -
+```
+
+To change an existing job from 30 to 15 minutes, without opening an editor:
+
+```sh
+crontab -l | sed 's#^\*/30 #*/15 #' | crontab -
 ```
 
 Errors (unreachable weather service, bad calendar URL, …) end up in
@@ -229,6 +240,7 @@ generated, so changes apply on the next run.
 | `[location]` | `timezone` | IANA time zone name, e.g. `America/Toronto` (also used to decide "today" and the noon switch) |
 | `[news]` | `feed_url` | RSS feed of headlines. Empty shows "Nouvelles non configurées" |
 | `[news]` | `headlines` | How many headlines to show (default 1; shows as many as fit, the last one may be truncated) |
+| `[sports]` | `team` | NHL team abbreviation whose game of the day before is shown (`MTL` = Canadiens). Empty disables it; the default is `MTL` when the section is missing |
 | `[display]` | `title` | Title in the header (default "Panneau Castor") |
 | `[calendar]` | `ics_url` | Private iCal (.ics) address. Empty shows "Calendrier non configuré" |
 
@@ -273,8 +285,8 @@ hidden `.adds` folder, so that Nickel doesn't import the downloaded image into y
 loop keeps a log (`fetch.log`) there too.
 
 **4. Edit `dashboard.conf`.** It already points to `http://192.168.1.135/dashboard.png` and
-refreshes every 5 minutes, which is handy for testing (use 1800 for 30 minutes in everyday
-use). If your Pi has another address, change `DASH_URL`. Environment variables with the same
+refreshes every 15 minutes (900 seconds, the rhythm of the Pi's cron job; use 300 while testing).
+If your Pi has another address, change `DASH_URL`. Environment variables with the same
 names override the file, for example `DASH_INTERVAL=60 sh kobo_fetch.sh loop`.
 
 **5. Run it** from KOReader's terminal emulator, with wifi on:
@@ -330,7 +342,12 @@ KFMon stays running and refuses a second launch in the meantime.
    your library (to give it the title "Panneau Castor", set
    `do_db_update = 1` in `dashboard.ini`, which writes to Nickel's database: it's off by default
    because that is a bit risky).
-5. Turn wifi on in Nickel **before** opening the icon: it stays on once Nickel is stopped.
+5. Turn wifi on in Nickel **before** opening the icon: it stays on once Nickel is stopped. If you
+   forget, nothing breaks: the launcher downloads the image *before* stopping Nickel, so with no
+   network it prints "Wifi indisponible" on the screen and leaves you in Nickel (if the Kobo has
+   the `qndb` tool, it first tries to turn wifi on by itself, which I haven't been able to
+   verify on a Kobo Mini). If the very first image can't be fetched or drawn, the loop gives up
+   and the Kobo reboots into Nickel instead of staying stuck on a frozen screen.
 
 **For your first tries,** set `DASH_MAX_LOOPS=3` in `dashboard.conf`: after three rounds the
 launcher reboots the Kobo by itself, so you can't get stuck.
@@ -427,6 +444,10 @@ Nickel is running.
   KOReader's terminal shares the screen. The `loop` mode keeps its messages out of the terminal
   (they go to `fetch.log`), but KOReader may still repaint itself. Use the
   [KFMon launcher](#running-it-like-an-app-kfmon-launcher), which runs without KOReader.
+- **No "Hier" section although the team played:** the NHL data may be late or the game may not be
+  marked as finished yet; check `output/dashboard.log` for "Résultat de hockey indisponible".
+  The game is looked up by the previous calendar day in your time zone. To turn the feature off,
+  set `team =` to nothing in the `[sports]` section of `config.ini`.
 - **The icon doesn't show up in the library at all:** that import is done by Nickel, not KFMon.
   Check that `panneau.png` is at the root of the Kobo (like `koreader.png`), that you ejected and
   waited a minute, and look in all library views (the entry is named after the file, "panneau").
@@ -456,6 +477,9 @@ Nickel is running.
 ## Roadmap
 
 - Test the calendar against a real Google Calendar / Outlook `.ics` feed.
+- Quit the launcher with the power button, and get back to Nickel without a forced reboot (needs
+  the input-device list from `probe.sh`).
+- Smarter clothing rules (look at the whole outing window rather than a single temperature).
 - Save battery: wifi off between rounds, then suspend with an RTC wake-up (needs the findings of
   `probe.sh` and `launcher.log` from a real Kobo Mini).
 - Validate the KFMon launcher on a real Kobo Mini (wifi, orientation, staying awake), then handle
@@ -468,6 +492,8 @@ Nickel is running.
 ## Credits
 
 - Weather data: [Open-Meteo](https://open-meteo.com/)
+- Hockey scores: the NHL's public web API (`api-web.nhle.com`), documented by the community at
+  [Zmalski/NHL-API-Reference](https://github.com/Zmalski/NHL-API-Reference)
 - E-ink drawing: [FBInk](https://github.com/NiLuJe/FBInk)
 - Reader software and launcher: [KOReader](https://github.com/koreader/koreader)
 - Calendar parsing: [icalendar](https://pypi.org/project/icalendar/) and

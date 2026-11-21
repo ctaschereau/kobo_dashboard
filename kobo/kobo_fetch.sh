@@ -8,7 +8,7 @@
 # Réglages : fichier « dashboard.conf » à côté du script (modèle : dashboard.conf.example).
 # Des variables d'environnement de même nom, si elles sont définies, priment sur le fichier :
 #   DASH_URL         adresse de l'image (défaut : celle de l'exemple du README, 192.168.1.135)
-#   DASH_INTERVAL    secondes entre deux rafraîchissements en mode loop (défaut : 1800)
+#   DASH_INTERVAL    secondes entre deux rafraîchissements en mode loop (défaut : 900, soit 15 minutes)
 #   DASH_MAX_LOOPS   nombre de tours avant d'arrêter la boucle, 0 = sans fin (défaut : 0)
 #   FBINK            chemin de fbink (défaut : celui du PATH, normalement /usr/bin/fbink)
 # Exemple :
@@ -32,7 +32,7 @@ _url="$DASH_URL"; _interval="$DASH_INTERVAL"; _max="$DASH_MAX_LOOPS"
 [ -n "$_max" ] && DASH_MAX_LOOPS="$_max"
 
 URL="${DASH_URL:-http://192.168.1.135/dashboard.png}"
-INTERVAL="${DASH_INTERVAL:-1800}"
+INTERVAL="${DASH_INTERVAL:-900}"
 MAX_LOOPS="${DASH_MAX_LOOPS:-0}"
 OUT="$DIR/dashboard.png"
 LOG="$DIR/fetch.log"
@@ -94,12 +94,26 @@ case "$1" in
     loop)
         log "démarrage (intervalle ${INTERVAL}s, tours max : ${MAX_LOOPS})"
         n=0
+        affichee=0                      # une image a-t-elle déjà été affichée ?
         while true; do
             # Les messages vont dans le journal, pas dans le terminal : un terminal qui
             # affiche du texte redessine l'écran et abîme l'image.
-            if ! fetch >> "$LOG" 2>&1; then log "téléchargement échoué"
-            elif ! show >> "$LOG" 2>&1; then log "affichage échoué"
-            else log "ok"
+            if ! fetch >> "$LOG" 2>&1; then raison="téléchargement échoué"
+            elif ! show >> "$LOG" 2>&1; then raison="affichage échoué"
+            else raison=""
+            fi
+            if [ -z "$raison" ]; then
+                affichee=1
+                log "ok"
+            else
+                log "$raison"
+                # Si rien n'a jamais pu s'afficher (wifi éteint, mauvaise adresse...), inutile
+                # de tourner dans le vide : on s'arrête, et le lanceur ramène la Kobo dans Nickel.
+                # Après une première image, on continue : une panne passagère du Pi ne l'efface pas.
+                if [ "$affichee" -eq 0 ]; then
+                    log "aucune image affichée jusqu'ici : abandon"
+                    exit 1
+                fi
             fi
             n=$((n + 1))
             if [ "$MAX_LOOPS" -gt 0 ] && [ "$n" -ge "$MAX_LOOPS" ]; then
