@@ -18,6 +18,16 @@ exec >> "$DIR/launcher.log" 2>&1       # KFMon n'a pas de terminal : tout va dan
 
 echo "=== $(date '+%Y-%m-%d %H:%M:%S') lancement ==="
 
+# On note ce que Nickel sait du wifi (interface, module) AVANT de l'arrêter : c'est nécessaire
+# pour piloter le wifi sans lui plus tard.
+echo "--- environnement de Nickel ---"
+pid=$(pidof nickel | cut -d' ' -f1)
+if [ -n "$pid" ]; then
+    tr '\0' '\n' < "/proc/$pid/environ" | grep -E '^(INTERFACE|WIFI_MODULE|WIFI_MODULE_PATH|PRODUCT|MODEL_NUMBER|PLATFORM)='
+else
+    echo "(Nickel ne tourne pas)"
+fi
+
 sync                                   # évite d'abîmer la base de données de Nickel
 # Même liste que le lanceur de KOReader. KFMon, lui, reste en place (et refuse un 2e lancement).
 killall -TERM nickel hindenburg sickel fickel fmon 2>/dev/null

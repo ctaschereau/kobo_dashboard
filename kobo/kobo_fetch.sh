@@ -71,10 +71,18 @@ show() {
     "$FBINK" -f -g file="$OUT"
 }
 
+# Niveau de batterie (ex. « 83% »), ou « ? » si introuvable : permet de mesurer la consommation.
+battery() {
+    for f in /sys/class/power_supply/*/capacity; do
+        if [ -r "$f" ]; then echo "$(cat "$f")%"; return; fi
+    done
+    echo "?"
+}
+
 # Ajoute une ligne horodatée au journal (on garde les 500 dernières lignes).
 # Un écart entre deux lignes plus grand que l'intervalle = la Kobo s'est endormie.
 log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $* [batterie $(battery)]" >> "$LOG"
     lines=$(wc -l < "$LOG")
     if [ $((lines + 0)) -gt 500 ]; then
         tail -n 500 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
