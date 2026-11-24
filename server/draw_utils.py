@@ -17,6 +17,13 @@ FONT_CANDIDATES = {
            "arialbd.ttf", "segoeuib.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"],
 }
 
+# Police à empattements en gras, utilisée pour le mot « MESSAGE » (repli : la police normale en gras)
+SERIF_BOLD_CANDIDATES = [
+    os.path.join(HERE, "DejaVuSerif-Bold.ttf"),
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf", "DejaVuSerif-Bold.ttf",
+    "georgiab.ttf", "timesbd.ttf", "/System/Library/Fonts/Supplemental/Georgia Bold.ttf",
+]
+
 _warned = False
 
 
@@ -37,6 +44,16 @@ def font(size, bold=False):
         return ImageFont.load_default(int(size))   # Pillow >= 10.1
     except TypeError:
         return ImageFont.load_default()
+
+
+def serif_font(size):
+    """Police à empattements en gras de la taille demandée (sinon la police normale en gras)."""
+    for path in SERIF_BOLD_CANDIDATES:
+        try:
+            return ImageFont.truetype(path, int(size))
+        except OSError:
+            continue
+    return font(size, True)
 
 
 def fit(d, text, max_w, size, bold=False, min_size=12):

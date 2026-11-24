@@ -30,7 +30,7 @@ calendar, top headlines) and the Kobo downloads and displays it on a schedule.
 ```
  Open-Meteo (weather)  ─┐
  News RSS feed         ─┼─►  Raspberry Pi                       Kobo Mini
- Calendar (.ics URL)   ─┘    server/dashboard.py                kobo/kobo_fetch.sh
+ Calendars (.ics URLs)  ─┘    server/dashboard.py                kobo/kobo_fetch.sh
                              writes output/dashboard.png  ──►    curl the PNG, show it with FBInk
                              (cron, every 15 min)                (loop, every 15 min)
                              nginx serves that one file
@@ -51,12 +51,19 @@ change than anything running on a 2012 e-reader.
   today (based on the feels-like temperature); from noon on they switch to tomorrow
   (based on the average of tomorrow's min and max).
 - **Bottom block, left:** today's calendar events that are not over yet (all-day events
-  first), in a compact two-line format. Shows "+ N autres" when they don't all fit, and
-  "Calendrier non configuré" if no calendar URL is set.
+  first), in a compact two-line format. Several calendars can be combined: their events are
+  shown together in one list, without saying which calendar each comes from, and identical
+  events (same start time, same title) appear only once. Shows "+ N autres" when they don't all
+  fit, and "Calendrier non configuré" if no calendar URL is set. If one of several calendars
+  can't be read, the others are still shown, with a small "1 calendrier inaccessible" at the
+  bottom so you don't mistake it for a free day.
 - **Bottom block, right:** the top news headline(s) in regular type, as many as fit. If your NHL
   team (the Canadiens by default) played yesterday, a "Hier" section with the final score
   (winner in bold, "Prolongation" or "Fusillade" when relevant) goes above the headlines, which
   then get less room. No game, no section.
+- **Custom message (optional):** when `message.txt` holds a message that has not expired, it
+  takes over the whole right column (clothing, hockey and news disappear; weather and
+  calendar stay), under a big serif "MESSAGE" heading. See [Custom message](#custom-message).
 
 If a data source fails (no network, bad URL), that block shows a short French message
 ("Météo indisponible", "Nouvelles indisponibles", "Calendrier indisponible") instead of
@@ -70,7 +77,7 @@ breaking the whole image, and the error is printed to stderr.
 | Weather (Open-Meteo) | Implemented; not yet verified end-to-end on the Pi |
 | News headlines | Implemented; the default Radio-Canada feed is listed as working by a third-party feed aggregator, not yet tested from the Pi |
 | Yesterday's NHL game | Implemented with the public NHL API; tested only against simulated responses |
-| Calendar (.ics) | Implemented (recurring events, all-day events, time zones); tested only with synthetic calendars, not yet with a real Google/Outlook one |
+| Calendar (.ics) | Implemented (several calendars merged with duplicates removed, recurring events, all-day events, time zones); tested only with synthetic calendars, not yet with a real Google/Outlook one |
 | Kobo fetch + display script | Working from KOReader's terminal (download and display tested on the Kobo Mini) |
 | Battery saving (wifi off between rounds, RTC wake-up) | **Not implemented yet**: needs details from a real Kobo Mini, which `probe.sh` collects |
 | KFMon launcher (icon in the library) | Written, **not yet tested on a Kobo**: wifi behaviour and screen orientation once Nickel is stopped are the open questions |
@@ -81,17 +88,20 @@ breaking the whole image, and the error is printed to stderr.
 ```
 kobo_dashboard/
 ├── README.md
+├── TODO algo linge.md        ideas for smarter clothing rules (not implemented)
 ├── config.example.ini        template for your private config (copy to config.ini)
 ├── config.ini                YOUR config: not committed (.gitignore)
+├── message.txt               optional custom message: not committed (.gitignore)
 ├── output/                   generated image and log: not committed (.gitignore)
 │   └── dashboard.png
 ├── docs/                     preview images used in this README
 ├── server/                   runs on the Raspberry Pi
 │   ├── dashboard.py          entry point: fetches data, lays out, writes the image
 │   ├── config.py             loads config.ini
-│   ├── calendar_events.py    reads an .ics URL, returns today's events
+│   ├── calendar_events.py    reads one or more .ics URLs, returns today's events merged
 │   ├── hockey.py             yesterday's result for an NHL team
-│   ├── check_calendar.py     diagnostic: shows what the .ics contains and what gets displayed
+│   ├── message.py            reads message.txt (custom message with optional expiry date)
+│   ├── check_calendar.py     diagnostic: shows what each .ics contains and what gets displayed
 │   ├── draw_utils.py         fonts, text fitting and wrapping helpers
 │   ├── icons.py              hand-drawn weather and clothing icons
 │   └── requirements.txt      Python dependencies
@@ -242,7 +252,7 @@ generated, so changes apply on the next run.
 | `[news]` | `headlines` | How many headlines to show (default 1; shows as many as fit, the last one may be truncated) |
 | `[sports]` | `team` | NHL team abbreviation whose game of the day before is shown (`MTL` = Canadiens). Empty disables it; the default is `MTL` when the section is missing |
 | `[display]` | `title` | Title in the header (default "Panneau Castor") |
-| `[calendar]` | `ics_url` | Private iCal (.ics) address. Empty shows "Calendrier non configuré" |
+| `[calendar]` | `ics_url` | Private iCal (.ics) address, or several, one per line (see [Several calendars](#several-calendars)). Empty shows "Calendrier non configuré" |
 
 **Calendar URL:** in Google Calendar, use *Settings → your calendar → Integrate calendar →
 "Secret address in iCal format"*. Anyone with that address can read your calendar, so treat
@@ -251,6 +261,63 @@ ever leaks (pasted in a chat, committed by mistake), reset it from the same scre
 Calendar (the *Reset* button next to the secret address) and put the new one in `config.ini`.
 `webcal://` addresses are accepted.
 
+### Several calendars
+
+`ics_url` accepts as many addresses as you want, **one per line**, each line starting with
+spaces (that is how `.ini` files continue a value). Lines starting with `#` are ignored, handy
+to note what each address is:
+
+```ini
+[calendar]
+ics_url =
+    # Perso
+    https://calendar.google.com/calendar/ical/.../basic.ics
+    # Famille
+    https://calendar.google.com/calendar/ical/.../basic.ics
+```
+
+- Events from all calendars are **merged into one list**, sorted (all-day first, then by start
+  time). The panel never says which calendar an event comes from.
+- **Duplicates are merged:** two events with the same start time (or both all-day) and the
+  same title count as one. Case and extra spaces are ignored ("Soccer Léa" = "soccer  léa").
+  Same title at different times stays two events. When duplicates differ slightly, the version
+  from the calendar listed first is the one displayed.
+- **If one calendar is down** (network, address reset, Google hiccup), the others are still
+  shown and a small "1 calendrier inaccessible" appears at the bottom of the calendar block.
+  "Calendrier indisponible" only shows when *none* could be read. The details are in
+  `output/dashboard.log`.
+- A single address on one line (as before) still works.
+- `check_calendar.py` (see [Troubleshooting](#troubleshooting)) checks each address in turn,
+  then shows what the panel will display.
+
+### Custom message
+
+To put a note on the panel (a reminder, a birthday, a "no school tomorrow"), create
+**`message.txt`** at the project root, next to `config.ini`:
+
+```
+2026-11-25T18:00
+Rappel : apporter les costumes d'Halloween à la garderie demain matin.
+```
+
+- While the message is active, it replaces the **whole right column**: clothing, the hockey
+  result and the news are gone. A big underlined **"MESSAGE"** heading (in a serif font) sits at
+  the top, and the text under it uses the biggest font that fits (44 px down to 18 px, then it
+  is cut with "…"). Weather and calendar stay on the left. News and hockey are
+  not even fetched during that time.
+- **First line = expiry date (optional).** If the first line is an ISO 8601 date, the message
+  disappears by itself after it and the normal display comes back, so there is nothing to
+  delete. Accepted forms: `2026-11-25T18:00`, `2026-11-25 18:00`, `2026-11-25T18:00:00-05:00`.
+  A date without a time (`2026-11-25`) means the end of that day. A date without a time zone
+  uses the `timezone` of `config.ini`. A first line that does not start with `AAAA-MM-JJ` is
+  just part of the message.
+- No date line: the message stays until you empty or delete the file.
+- Line breaks in the file are kept (an empty line leaves a gap).
+- Like everything else, it is read each time the image is generated (every 15 minutes), so a
+  change shows up on the next run. To see it right away, run `server/dashboard.py` by hand.
+- A mistyped date (`2026-13-45`) is reported in the log, the line is dropped, and the message
+  is shown with no expiry.
+
 **Other settings live in the code:**
 
 | Setting | Where | Notes |
@@ -258,7 +325,7 @@ Calendar (the *Reset* button next to the secret address) and put the new one in 
 | Clothing rules | `clothes()` in `server/dashboard.py` | Coat under 20°, boots and tuque under 5°, mittens under 0°, snow pants under -10°, umbrella if rain or 50%+ chance, sun hat if 25°+ and sunny |
 | Noon switch | `now.hour >= 12` in `draw_weather()` | When clothing icons switch to tomorrow |
 | Icons | `server/icons.py` | Drawn with Pillow primitives in a 100×100 virtual box |
-| Fonts | `FONT_CANDIDATES` in `server/draw_utils.py` | Tries a font next to the script, then Linux, Windows, macOS paths |
+| Fonts | `FONT_CANDIDATES` in `server/draw_utils.py` | Tries a font next to the script, then Linux, Windows, macOS paths. The "MESSAGE" heading uses `SERIF_BOLD_CANDIDATES` (DejaVu Serif Bold, included with the usual `fonts-dejavu-core` package); if none is found it falls back to the regular bold font |
 
 Weather data comes from [Open-Meteo](https://open-meteo.com/) (no API key). It returns a
 standard WMO weather code and an `is_day` flag, which the script maps to an icon and a
@@ -360,6 +427,29 @@ folder and the icon (`panneau.png`) from the root of the Kobo.
 **Logs:** `launcher.log` (start-up, network interfaces, end) and `fetch.log` (one line per round)
 in `/mnt/onboard/.adds/dash/`.
 
+**What goes where on the Kobo.** Once the launcher is set up, only these files matter:
+
+| Where | What | Status |
+|---|---|---|
+| `/mnt/onboard/.adds/dash/` | `dashboard.sh`, `kobo_fetch.sh`, `dashboard.conf` | needed |
+| `/mnt/onboard/.adds/dash/` | `dashboard.png`, `fetch.log`, `launcher.log` | created automatically |
+| `/mnt/onboard/.adds/dash/` | `probe.sh`, `probe.txt` | optional diagnostic, can be deleted |
+| `/mnt/onboard/panneau.png` | the library icon | needed |
+| `/mnt/onboard/.adds/kfmon/config/dashboard.ini` | KFMon watch config | needed |
+
+Anything else is leftover from testing, in particular an old visible `/mnt/onboard/dash/` folder
+(copies of the scripts, a `Dashboard/` folder, an old `dashboard.png`, `test_loop.log`, a `kfmon/`
+subfolder copied from the repository, …). None of it is used, and it can be deleted once the
+launcher works. Since Nickel imports PNG files from visible folders, those leftovers may also show
+up as extra "books" in your library.
+
+**Careful with the two `kfmon` folders:** `/mnt/onboard/.adds/kfmon/` is KFMon's real folder (it
+holds the config of KOReader too): keep it. A `kfmon/` folder inside `/mnt/onboard/dash/` is just
+a copy of the repository's `kobo/kfmon/` folder and does nothing.
+
+When you update the scripts, copy over `dashboard.sh`, `kobo_fetch.sh` and `probe.sh`, but keep
+your own `dashboard.conf`.
+
 **What isn't verified yet:** I haven't been able to run this on a real Kobo Mini. The points to
 check on your device are whether wifi really stays up once Nickel is stopped (the author of KFMon
 says it does when it was on beforehand), whether the image keeps the right orientation, and whether
@@ -420,7 +510,7 @@ Nickel is running.
   image:** the Pi couldn't reach that source or couldn't read it. The exact error is in
   `output/dashboard.log` (or on screen if you ran the script by hand).
 - **The calendar says "Rien de prévu" but you have events:** run the diagnostic, which shows
-  what the calendar file contains and why each event is or isn't displayed:
+  what each calendar file contains and why each event is or isn't displayed:
 
   ```sh
   /home/pi/kobo_dashboard/.venv/bin/python /home/pi/kobo_dashboard/server/check_calendar.py
@@ -432,6 +522,10 @@ Nickel is running.
   address you configured. The diagnostic never prints the full URL.
 - **"Calendrier non configuré" / "Nouvelles non configurées":** `ics_url` / `feed_url` is
   empty in `config.ini`.
+- **"1 calendrier inaccessible" (or "2 calendriers inaccessibles") under the calendar:** with
+  several calendars, one or more could not be read while the others worked. Run
+  `check_calendar.py` (above): it tests each address in turn and names the one that fails. The
+  usual cause is a secret address that was reset in Google Calendar.
 - **nginx returns 404:** `output/dashboard.png` doesn't exist yet (run the script once), or
   the `alias` path doesn't match your install folder.
 - **nginx returns 403:** see the `chmod o+x /home/pi` step above.
@@ -444,6 +538,11 @@ Nickel is running.
   KOReader's terminal shares the screen. The `loop` mode keeps its messages out of the terminal
   (they go to `fetch.log`), but KOReader may still repaint itself. Use the
   [KFMon launcher](#running-it-like-an-app-kfmon-launcher), which runs without KOReader.
+- **The message doesn't show up (or won't go away):** the file must be named exactly
+  `message.txt` and sit at the project root, and the image only changes on the next run (every
+  15 minutes). It is hidden if its first line is a date that has already passed (the time zone
+  is the one in `config.ini`). It is also hidden if the file has only a date and no text.
+  If the expiry date is mistyped, `output/dashboard.log` says "date d'expiration invalide".
 - **No "Hier" section although the team played:** the NHL data may be late or the game may not be
   marked as finished yet; check `output/dashboard.log` for "Résultat de hockey indisponible".
   The game is looked up by the previous calendar day in your time zone. To turn the feature off,
@@ -479,7 +578,8 @@ Nickel is running.
 - Test the calendar against a real Google Calendar / Outlook `.ics` feed.
 - Quit the launcher with the power button, and get back to Nickel without a forced reboot (needs
   the input-device list from `probe.sh`).
-- Smarter clothing rules (look at the whole outing window rather than a single temperature).
+- Smarter clothing rules (look at the whole outing window rather than a single temperature):
+  see `TODO algo linge.md`.
 - Save battery: wifi off between rounds, then suspend with an RTC wake-up (needs the findings of
   `probe.sh` and `launcher.log` from a real Kobo Mini).
 - Validate the KFMon launcher on a real Kobo Mini (wifi, orientation, staying awake), then handle

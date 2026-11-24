@@ -4,6 +4,9 @@ __pycache__/
 # Configuration locale (contient des valeurs privées, dont l'adresse secrète du calendrier)
 config.ini
 
+# Message libre affiché sur le panneau (propre à chaque installation, change souvent)
+message.txt
+
 # Image générée et journaux
 output/
 

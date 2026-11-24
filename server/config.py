@@ -33,13 +33,18 @@ class Config:
     timezone: str
     news_url: str       # vide = nouvelles non configurées
     news_count: int
-    calendar_url: str   # vide = calendrier non configuré
+    calendar_url: str   # vide = calendrier non configuré ; plusieurs adresses possibles (une par ligne)
     title: str = "Panneau Castor"   # titre affiché en haut de l'image
     team: str = "MTL"               # équipe de la LNH dont on affiche le match de la veille ; vide = désactivé
 
     @property
     def tz(self):
         return ZoneInfo(self.timezone)
+
+    @property
+    def calendar_urls(self):
+        """Les adresses des calendriers (séparées par des espaces ou des sauts de ligne)."""
+        return self.calendar_url.split()
 
 
 def load_config(path=None):
