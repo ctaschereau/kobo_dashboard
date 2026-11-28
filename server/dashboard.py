@@ -37,6 +37,7 @@ from message import current_message
 W, H = 600, 800
 MID_X = 300                       # séparateur vertical (gauche | droite)
 HEADER_H = 54                     # bandeau du titre
+BATT_ZONE = 74                    # coin haut droit laissé vide : la Kobo y dessine son niveau de batterie
 WEATHER_H = 400                   # bloc météo
 MID_Y = HEADER_H + WEATHER_H      # séparateur horizontal météo / bas
 BOTTOM_TOP = MID_Y + 4            # début du bloc du bas
@@ -208,14 +209,19 @@ def draw_weather(d, w, now, with_clothes=True):
 
 
 def draw_header(d, title, now):
-    """Bandeau du haut : titre à gauche, date/heure de mise à jour (petit) à droite."""
+    """Bandeau du haut : titre à gauche, date/heure de mise à jour (petit) à droite.
+
+    Les derniers BATT_ZONE pixels à droite restent blancs : c'est là que la Kobo dessine le
+    pourcentage de batterie par-dessus l'image (voir overlay_battery dans kobo/kobo_fetch.sh).
+    """
+    right = W - BATT_ZONE - 6                         # bord droit du bloc « Mis à jour »
     stamp1 = "Mis à jour"
     stamp2 = f"{now.day} {MOIS_COURTS[now.month - 1]} à {now:%H:%M}"
     f1, f2 = font(14), fit(d, stamp2, 150, 17, min_size=11)
     stamp_w = max(d.textlength(stamp1, font=f1), d.textlength(stamp2, font=f2))
-    d.text((W - 20, 16), stamp1, font=f1, fill=0, anchor="rm")
-    d.text((W - 20, 36), stamp2, font=f2, fill=0, anchor="rm")
-    d.text((20, 26), title, font=fit(d, title, W - 40 - stamp_w - 16, 36, True),
+    d.text((right, 16), stamp1, font=f1, fill=0, anchor="rm")
+    d.text((right, 36), stamp2, font=f2, fill=0, anchor="rm")
+    d.text((20, 26), title, font=fit(d, title, right - 36 - stamp_w, 36, True),
            fill=0, anchor="lm")
 
 

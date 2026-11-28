@@ -44,7 +44,9 @@ change than anything running on a 2012 e-reader.
 
 - **Header:** a title ("Panneau Castor" by default) with, in small text on the right, when
   the image was last updated (for example "12 nov. à 11:00"), which makes a stale image easy
-  to spot.
+  to spot. The top-right corner (the last 74 px) is left blank on purpose: the Kobo draws its
+  own **battery percentage** there, on top of the image (see [Battery level on the
+  screen](#battery-level-on-the-screen)).
 - **Weather block, left:** big weather icon (sun, moon at night, clouds, rain, snow, fog,
   storm), the condition in French, the current temperature, and the day's min/max.
 - **Weather block, right:** up to 6 clothing icons for the children. Before noon they are for
@@ -106,7 +108,7 @@ kobo_dashboard/
 │   ├── icons.py              hand-drawn weather and clothing icons
 │   └── requirements.txt      Python dependencies
 └── kobo/                     runs on the Kobo
-    ├── kobo_fetch.sh         download the image, display it, or loop (with a log)
+    ├── kobo_fetch.sh         download the image, display it (with the battery % on top), or loop (with a log)
     ├── dashboard.conf.example  settings for the Kobo scripts (copy to dashboard.conf)
     ├── dashboard.sh          KFMon launcher: stops Nickel, runs the loop, reboots at the end
     ├── probe.sh              read-only diagnostic (battery, sleep, RTC wake-up, wifi)
@@ -362,10 +364,30 @@ names override the file, for example `DASH_INTERVAL=60 sh kobo_fetch.sh loop`.
 sh /mnt/onboard/.adds/dash/kobo_fetch.sh        # download only
 sh /mnt/onboard/.adds/dash/kobo_fetch.sh show   # download and display
 sh /mnt/onboard/.adds/dash/kobo_fetch.sh loop   # download and display, again and again
+sh /mnt/onboard/.adds/dash/kobo_fetch.sh battery # only redraw the battery % on the displayed image
 ```
 
 Running from KOReader's terminal is meant for testing: KOReader keeps owning the screen and may
 repaint parts of itself over the image. The launcher below avoids that.
+
+#### Battery level on the screen
+
+After drawing the image, `kobo_fetch.sh` writes the Kobo's battery percentage (read from
+`/sys/class/power_supply/*/capacity`, the same value that ends up in `fetch.log`) in the top-right
+corner, next to the "Mis à jour" date. This is done **on the Kobo**, with FBInk's built-in text
+(`-S 2`: 16 px letters), because only the Kobo knows its battery level: the server just keeps
+that corner blank (`BATT_ZONE` in `server/dashboard.py`, 74 px; the date block sits just left of
+it). It is refreshed every time the image is redrawn, so every 15 minutes.
+
+- To turn it off, set `DASH_BATTERY=0` in `dashboard.conf`. The corner then stays blank.
+- If the number is not well placed, or too small or too big, adjust `DASH_BATTERY_SIZE`,
+  `DASH_BATTERY_X` (pixels, positive = right) and `DASH_BATTERY_Y` (pixels, positive = down) in
+  `dashboard.conf`, then test with `sh kobo_fetch.sh battery`: it redraws only the number on the
+  image already on screen, no download.
+- If the level can't be read, nothing is drawn. If FBInk fails on the overlay, the image stays
+  displayed and `fetch.log` notes it ("overlay batterie échoué").
+- The zone is sized for "100%" (4 characters at 16 px = 64 px) with a few pixels to spare; with
+  `DASH_BATTERY_SIZE=3` the text no longer fits and would run onto the date.
 
 Plain `http://` is deliberate: the old Kobo firmware may struggle with modern HTTPS
 certificates, and this only travels over your home network.
@@ -553,6 +575,11 @@ Nickel is running.
   To find out whether the problem is the file or the location, copy `koreader.png` to a new
   file `test.png` at the root: if that one appears and `panneau.png` doesn't, the PNG format is
   the problem.
+- **No battery percentage in the top-right corner:** check `DASH_BATTERY` is not `0` in
+  `dashboard.conf`, that you copied the **new** `kobo_fetch.sh` to the Kobo, and run
+  `sh kobo_fetch.sh battery` by hand: any error is printed. Nothing is drawn if the level can't
+  be read (`[batterie ?]` in `fetch.log`). The server image must also be recent (the older one
+  has the date in that corner, so the number would print over it).
 - **The Kobo falls asleep anyway, or the battery drains too fast:** start with `launcher.log` and
   `fetch.log` in `/mnt/onboard/.adds/dash/`. A line "boucle terminée, redémarrage" means the
   loop ended and the Kobo rebooted into Nickel, which then goes to sleep as usual: that happens
